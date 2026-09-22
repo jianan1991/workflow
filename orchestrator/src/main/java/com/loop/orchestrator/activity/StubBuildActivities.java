@@ -3,6 +3,7 @@ package com.loop.orchestrator.activity;
 import com.loop.orchestrator.domain.Domain.AcceptanceCriterion;
 import com.loop.orchestrator.domain.Domain.Agent;
 import com.loop.orchestrator.domain.Domain.CiResult;
+import com.loop.orchestrator.domain.Domain.ImplementResult;
 import com.loop.orchestrator.domain.Domain.QaOutcome;
 import com.loop.orchestrator.domain.Domain.QaResult;
 import com.loop.orchestrator.domain.Domain.ReviewResult;
@@ -40,10 +41,14 @@ public class StubBuildActivities implements BuildActivities {
     public static final String CRITERION_GAP_MARKER = "[criteria-gap]";
 
     @Override
-    public String implement(Story story, Agent agent, int attempt, String previousFailure) {
+    public ImplementResult implement(Story story, Agent agent, int attempt,
+                                     String previousFailure) {
         log.info("[{}] {} attempt {}{}", agent.name().toLowerCase(), story.id(), attempt,
                 previousFailure == null ? "" : " — fixing: " + previousFailure);
-        return "branch feat/" + story.id().toLowerCase() + " · 4 files";
+        // A plausible figure, because a stub reporting zero would make the cost arithmetic
+        // in the workflow untestable.
+        double cost = agent == Agent.SENIOR ? 1.85 : 0.42;
+        return new ImplementResult("branch feat/" + story.id().toLowerCase() + " · 4 files", cost);
     }
 
     @Override
@@ -68,8 +73,9 @@ public class StubBuildActivities implements BuildActivities {
 
         ReviewResult result = scopeExceeded
                 ? new ReviewResult(true, true,
-                        "correct, but edits application.yml — outside the ticket, so no auto-approval")
-                : new ReviewResult(true, false, "matches the acceptance criteria");
+                        "correct, but edits application.yml — outside the ticket, so no auto-approval",
+                        0.11)
+                : new ReviewResult(true, false, "matches the acceptance criteria", 0.11);
 
         log.info("[reviewer] {} (author {}) -> {}", story.id(), author, result.verdict());
         return result;

@@ -72,7 +72,7 @@ public class ReviewerAgent {
                 NAME, SYSTEM, buildPrompt(story, criteria, author, diff, changedFiles),
                 maxOutputTokens));
 
-        Result result = parse(response.text(), story.id());
+        Result result = parse(response.text(), story.id()).withCost(response.costUsd());
         log.info("[reviewer] {} (author {}) — matches={} scope={} — {} in / {} out",
                 story.id(), author, result.review().matchesCriteria(),
                 result.review().scopeExceeded(), response.inputTokens(), response.outputTokens());
@@ -165,5 +165,10 @@ public class ReviewerAgent {
 
     public record Result(ReviewResult review, List<String> unmetCriteria,
                          List<String> outOfScopeFiles) {
+
+        Result withCost(double costUsd) {
+            return new Result(new ReviewResult(review.matchesCriteria(), review.scopeExceeded(),
+                    review.verdict(), costUsd), unmetCriteria, outOfScopeFiles);
+        }
     }
 }

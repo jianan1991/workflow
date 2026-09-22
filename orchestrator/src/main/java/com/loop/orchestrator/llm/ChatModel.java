@@ -48,11 +48,20 @@ public interface ChatModel {
      *                     number that eventually replaces the guesses in
      *                     cost-model.properties and makes the "actual" column real
      */
-    record ChatResponse(String text, int inputTokens, int outputTokens, String model) {
+    record ChatResponse(String text, int inputTokens, int outputTokens, String model,
+                        double costUsd) {
+
+        public ChatResponse(String text, int inputTokens, int outputTokens, String model) {
+            this(text, inputTokens, outputTokens, model, 0.0);
+        }
 
         public double costUsd(double inputPricePerMillion, double outputPricePerMillion) {
             return (inputTokens / 1_000_000.0) * inputPricePerMillion
                     + (outputTokens / 1_000_000.0) * outputPricePerMillion;
+        }
+
+        public ChatResponse withCost(double priced) {
+            return new ChatResponse(text, inputTokens, outputTokens, model, priced);
         }
     }
 }

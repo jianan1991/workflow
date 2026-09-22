@@ -88,7 +88,8 @@ public class QaAgent {
         ChatModel.ChatResponse response = model.complete(new ChatModel.ChatRequest(
                 NAME, SYSTEM, buildPrompt(story, criteria, observations), maxOutputTokens));
 
-        Result result = parse(response.text(), story.id(), criteria);
+        Result result = parse(response.text(), story.id(), criteria)
+                .withCost(response.costUsd());
         log.info("[qa] {} — {} pass, {} defect, {} criterion-wrong, {} unverifiable, {} in / {} out",
                 story.id(), result.count(QaOutcome.PASS), result.count(QaOutcome.CODE_DEFECT),
                 result.count(QaOutcome.CRITERION_WRONG), result.count(QaOutcome.UNVERIFIABLE),
@@ -192,7 +193,16 @@ public class QaAgent {
      * @param concerns things no criterion covers — the fail-open behaviour nobody specified.
      *                 These route to the PM, because there is no criterion to fix.
      */
-    public record Result(List<CriterionVerdict> verdicts, List<CriterionVerdict> concerns) {
+    public record Result(List<CriterionVerdict> verdicts, List<CriterionVerdict> concerns,
+                         double costUsd) {
+
+        public Result(List<CriterionVerdict> verdicts, List<CriterionVerdict> concerns) {
+            this(verdicts, concerns, 0.0);
+        }
+
+        Result withCost(double priced) {
+            return new Result(verdicts, concerns, priced);
+        }
 
         public long count(QaOutcome outcome) {
             return verdicts.stream().filter(v -> v.outcome() == outcome).count()

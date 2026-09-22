@@ -125,6 +125,7 @@ real Temporal server, scripted model, no key:
 [ba]        writes criteria per story — 4 each, 3 automated
 [estimate]  $10.67 and 99 human minutes
 gate 1      12 criteria automated, 4 need a person
+            $10.67 estimated; actual accrues per activity as stories run
 ```
 
 **The dev agent is the one that is not wired.** `implement()` and `runCi()` are honestly
@@ -305,12 +306,19 @@ loop, escalation, dependency-ordered fan-out.
 **Stop if:** the resume fails. That is the single assumption the whole architecture rests
 on, and every other component is built on top of it.
 
-**Known gap found while running this.** The story workflow accumulates spend from whatever
-`QaResult.costUsd()` reports, and the stub hardcodes that — so the run reported $2.92 actual
-against a $12.02 estimate. That difference is a stub artifact, **not** a finding about cost.
-Actual-versus-estimate reconciliation is not wired yet: real spend has to come from the
-LiteLLM proxy's per-call accounting, keyed by agent. Until it does, the "actual" column on
-the cost screen is fiction.
+**Cost reconciliation is now wired.** Every activity reports what its own call consumed and
+the workflow sums — dev, reviewer and QA, not QA alone, which was under-reporting a story by
+most of its cost. `CostingChatModel` prices each call from the tokens actually used, against
+the same `cost-model.properties` that produces the gate-1 estimate, so estimate and actual
+are denominated in the same units.
+
+It prices the scripted model too, deliberately: a free run reports what it **would** have
+cost, so the arithmetic is exercised on every test run instead of first meeting reality on an
+invoice.
+
+The figure is still not a measurement of anything real, because nothing implements stories
+yet and the dev agent is the largest line on the bill. What is true now is that the number
+comes from tokens rather than from a constant.
 
 ---
 
@@ -552,6 +560,7 @@ Append a line whenever exit checks are run. Date, phase, what was run, outcome.
 | 2026-09-22 | 0, 1 | built `scripts/baseline.py` and `CostWorksheet` | Instruments ready. Neither phase can close until the repo is named (Q1) and the unit costs are measured rather than guessed. |
 | 2026-09-22 | 4 | worker kill/restart against real Temporal + full epic run | **PASS.** Workflow survived the worker being killed, a signal was accepted with no worker alive, and the new worker resumed from the await line. Epic ran through to MERGED with 2 rework loops and no human in them. Found that actual-cost reconciliation is not wired — see the phase 4 note. |
 | 2026-09-22 | 6, 7, 9 | agents wired + end-to-end run | **132 fast + 4 integration green.** Agents now called by the pipeline, not merely beaned. Three bugs found by running the application rather than by tests: the Qdrant collection was never created, the PM script could not tell its two calls apart, and the scripted QA reported passes when nothing had run. |
+| 2026-09-22 | 4 | cost reconciliation + end-to-end run | **140 fast + 4 integration green.** Spend now comes from real token usage, summed across dev, reviewer and QA. A run reported $0.0036 per story where it had reported $0.0000 — the tracking was working and `round2` was rounding sub-cent spend away, which reads exactly like cost tracking that was never wired. |
 | 2026-09-22 | 9 | BA criteria threaded through | The reviewer and QA were judging against criteria invented from the story title. Now per story, carried on the child workflow. Gate 1 reports the real testability split: 12 automated, 4 needing a person. |
 | 2026-09-22 | 6, 7, 9 | `./scripts/verify.sh --all` | **112 fast + 4 integration green.** PM, BA, architect, reviewer and QA agents written and tested against a scripted model. Every automated box in those phases is ticked; none of the phases are done, because judging output needs a key and a person. |
 | 2026-09-22 | 1 | `AgentCostModel` + `mvn test` | Unit costs now **derived** from Anthropic list prices x per-agent tokens, with tier→model mapping. Six-story epic: **$12.02**. 49 tests green. Token counts are still estimates — that is what remains before phase 1 closes. |
@@ -569,13 +578,14 @@ Append a line whenever exit checks are run. Date, phase, what was run, outcome.
 | `QaAgentTest` | 15 | Routing order, completeness, never seeing the dev agent's tests |
 | `AgentActivitiesTest` | 8 | That the agents are actually reached — asserts on the model being called, not only on values returned |
 | `ReviewerIndependenceTest` | 12 | Family attribution, uncertainty resolving toward warning |
+| `CostingChatModelTest` | 6 | Pricing per tier, scripted runs priced, unpriced agents not silent |
 | `EstimateCalculatorTest` | 13 | The worked example, which stages loop, tier cost, designer only with a UI, human minutes, four rejections |
 | `MarkdownChunkerTest` | 6 | Section splitting, frontmatter, stable ids, folding short sections |
 | `RetrievalTest` | 8 | Search accuracy, attribution, re-indexing, the attempt cap, failure modes |
 | `EpicWorkflowTest` | 5 | Journey blocking and resume, abandonment, rejected gate, dependency layers |
 | `StoryWorkflowTest` | 4 | Auto-approve, the rework loop, the PM route, an unreviewed PR |
 | `QdrantVectorStoreIT` | 4 | Store parity, payload round trip, upsert replacing, idempotent setup |
-| **Fast suite** | **132** | No Docker, no API key, about 9 seconds |
+| **Fast suite** | **140** | No Docker, no API key, about 9 seconds |
 
 Mutation score on `EstimateCalculator`: **92%** against a 70% threshold.
 
@@ -588,7 +598,6 @@ the four that decide whether any of this was worth doing.
 | :-- | :-- |
 | No agent has ever called a real model | every phase from 6 on stays ◐ |
 | The dev agent is not wired; `implement` and `runCi` are stubs | phase 8, and said plainly in `AgentBuildActivities` |
-| Story cost is not reconciled — `costUsd` is not fed by real token usage | phase 4 note |
 | The reviewer shares a model family with the author | phase 9, warned at startup |
 | The architect guesses the dependency graph; no code index | phase 7 |
 | Gate 2 never fires — the architect flags structural changes and the workflow ignores it | logged as a warning on every structural epic |

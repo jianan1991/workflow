@@ -8,6 +8,7 @@ import com.loop.orchestrator.agent.ReviewerAgent;
 import com.loop.orchestrator.cost.AgentCostModel;
 import com.loop.orchestrator.knowledge.KnowledgeIndexer;
 import com.loop.orchestrator.llm.ChatModel;
+import com.loop.orchestrator.llm.CostingChatModel;
 import com.loop.orchestrator.llm.LiteLlmChatModel;
 import com.loop.orchestrator.llm.ScriptedChatModel;
 import com.loop.orchestrator.policy.ReviewerIndependence;
@@ -81,8 +82,17 @@ public class LlmConfig {
             @Value("${llm.provider:scripted}") String provider,
             @Value("${llm.base-url}") String baseUrl,
             @Value("${llm.api-key}") String apiKey,
-            @Value("${cost.model-file:../cost-model.properties}") String costModelFile) {
+            @Value("${cost.model-file:../cost-model.properties}") String costModelFile,
+            AgentCostModel costs) {
 
+        // Priced either way. A scripted run reports what it WOULD have cost at real prices,
+        // so the cost path is exercised on every test run rather than first meeting
+        // arithmetic on an invoice.
+        return new CostingChatModel(underlying(provider, baseUrl, apiKey, costModelFile), costs);
+    }
+
+    private ChatModel underlying(String provider, String baseUrl, String apiKey,
+                                 String costModelFile) {
         if (!"litellm".equalsIgnoreCase(provider)) {
             log.warn("llm.provider=scripted — NO MODEL WILL BE CALLED. This proves the "
                     + "plumbing, never the quality of an agent's answers. Set "

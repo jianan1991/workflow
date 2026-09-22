@@ -184,7 +184,12 @@ public final class Domain {
      * its own family — which is why it runs on a different model family from the author
      * and why {@code scopeExceeded} blocks auto-approval on its own.
      */
-    public record ReviewResult(boolean matchesCriteria, boolean scopeExceeded, String verdict) {
+    public record ReviewResult(boolean matchesCriteria, boolean scopeExceeded, String verdict,
+                               double costUsd) {
+
+        public ReviewResult(boolean matchesCriteria, boolean scopeExceeded, String verdict) {
+            this(matchesCriteria, scopeExceeded, verdict, 0.0);
+        }
     }
 
     /**
@@ -231,6 +236,16 @@ public final class Domain {
      * @param reworkLoops passes through QA → dev that never touched a person. Every one of
      *                    these is the system paying for itself; count them.
      */
+    /**
+     * What a dev agent produced, and what it spent doing it.
+     *
+     * <p>Cost is reported per activity rather than accumulated somewhere central, because
+     * an activity is the only thing that knows what its own call consumed — and a workflow
+     * summing values it was handed is replay-safe, while one reading a running total is not.
+     */
+    public record ImplementResult(String branch, double costUsd) {
+    }
+
     public record StoryStatus(String storyId,
                               int tier,
                               Agent agent,

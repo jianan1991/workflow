@@ -5,6 +5,7 @@ import com.loop.orchestrator.agent.ReviewerAgent;
 import com.loop.orchestrator.domain.Domain.AcceptanceCriterion;
 import com.loop.orchestrator.domain.Domain.Agent;
 import com.loop.orchestrator.domain.Domain.CiResult;
+import com.loop.orchestrator.domain.Domain.ImplementResult;
 import com.loop.orchestrator.domain.Domain.Observation;
 import com.loop.orchestrator.domain.Domain.QaOutcome;
 import com.loop.orchestrator.domain.Domain.QaResult;
@@ -45,12 +46,15 @@ public class AgentBuildActivities implements BuildActivities {
     }
 
     @Override
-    public String implement(Story story, Agent agent, int attempt, String previousFailure) {
-        // NOT WIRED. Needs the OpenHands dispatch and a sandbox to run in. Returning a
-        // plausible branch name keeps the orchestration runnable; it writes no code.
-        log.warn("[{}] {} attempt {} — dev agent is not wired; no code was written",
+    public ImplementResult implement(Story story, Agent agent, int attempt,
+                                     String previousFailure) {
+        // NOT WIRED. Needs the OpenHands dispatch and a sandbox to run in. Zero cost is
+        // accurate here precisely because nothing ran — it will stop being accurate the
+        // moment the dispatch lands, and the dev agent is the largest line on the bill.
+        log.warn("[{}] {} attempt {} — dev agent is not wired; no code was written, $0 spent",
                 agent.name().toLowerCase(), story.id(), attempt);
-        return "branch feat/" + story.id().toLowerCase() + " (no dispatch yet)";
+        return new ImplementResult(
+                "branch feat/" + story.id().toLowerCase() + " (no dispatch yet)", 0.0);
     }
 
     @Override
@@ -86,7 +90,8 @@ public class AgentBuildActivities implements BuildActivities {
                         ? "all criteria satisfied"
                         : judged.concerns().get(0).evidence());
 
-        return new QaResult(judged.route(), evidence, (int) judged.unverifiable(), 0.0, 0);
+        return new QaResult(judged.route(), evidence, (int) judged.unverifiable(),
+                judged.costUsd(), 0);
     }
 
     @Override

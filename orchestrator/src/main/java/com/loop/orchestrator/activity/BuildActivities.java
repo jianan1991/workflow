@@ -3,6 +3,7 @@ package com.loop.orchestrator.activity;
 import com.loop.orchestrator.domain.Domain.AcceptanceCriterion;
 import com.loop.orchestrator.domain.Domain.Agent;
 import com.loop.orchestrator.domain.Domain.CiResult;
+import com.loop.orchestrator.domain.Domain.ImplementResult;
 import com.loop.orchestrator.domain.Domain.QaResult;
 import com.loop.orchestrator.domain.Domain.ReviewResult;
 import com.loop.orchestrator.domain.Domain.Story;
@@ -26,7 +27,7 @@ public interface BuildActivities {
      * @param attempt 1-based. The agent is told what failed last time, so attempt 2 is not
      *                a blind retry.
      */
-    String implement(Story story, Agent agent, int attempt, String previousFailure);
+    ImplementResult implement(Story story, Agent agent, int attempt, String previousFailure);
 
     /**
      * Run the build. An agent cannot open a pull request until this passes.

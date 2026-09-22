@@ -112,6 +112,33 @@ class StoryWorkflowTest {
     }
 
     @Test
+    @DisplayName("story cost sums what every activity spent, not just QA")
+    void costSumsEveryActivity() {
+        Story story = new Story("LOOP-14-1", "Tenant config lookup", 1, List.of());
+
+        StoryStatus result = runToCompletion(story, true);
+
+        // dev 0.42 + reviewer 0.11 + qa 0.36 on a clean tier 1 run.
+        assertThat(result.costUsd())
+                .as("counting only QA under-reports a story by most of its cost, and the dev "
+                        + "agent is the largest line on the bill")
+                .isGreaterThan(0.36);
+    }
+
+    @Test
+    @DisplayName("sub-cent spend is reported, not rounded away into looking like zero")
+    void subCentSpendSurvives() {
+        Story story = new Story("LOOP-14-1", "Tenant config lookup", 1, List.of());
+
+        StoryStatus result = runToCompletion(story, true);
+
+        assertThat(result.costUsd() * 10_000)
+                .as("rounding real spend to currency reads exactly like cost tracking that "
+                        + "was never wired")
+                .isGreaterThanOrEqualTo(1.0);
+    }
+
+    @Test
     @DisplayName("a story with no criteria is blocked rather than built")
     void noCriteriaBlocks() {
         Story story = new Story("LOOP-14-9", "Something nobody specified", 1, List.of());

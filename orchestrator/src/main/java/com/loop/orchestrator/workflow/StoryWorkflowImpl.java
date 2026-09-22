@@ -6,6 +6,7 @@ import com.loop.orchestrator.domain.Domain.Agent;
 import com.loop.orchestrator.domain.Domain.CiResult;
 import com.loop.orchestrator.domain.Domain.Gate;
 import com.loop.orchestrator.domain.Domain.GateDecision;
+import com.loop.orchestrator.domain.Domain.ImplementResult;
 import com.loop.orchestrator.domain.Domain.QaResult;
 import com.loop.orchestrator.domain.Domain.ReviewResult;
 import com.loop.orchestrator.domain.Domain.Story;
@@ -99,7 +100,11 @@ public class StoryWorkflowImpl implements StoryWorkflow {
             devAttempts++;
 
             state = StoryState.IMPLEMENTING;
-            build.implement(story, agent, devAttempts, previousFailure);
+            // Every activity reports what it spent, and the workflow sums. A running total
+            // read from somewhere central would not survive a replay.
+            ImplementResult implemented = build.implement(story, agent, devAttempts,
+                    previousFailure);
+            costUsd += implemented.costUsd();
 
             state = StoryState.CI;
             CiResult ci = build.runCi(story, devAttempts);
@@ -113,6 +118,7 @@ public class StoryWorkflowImpl implements StoryWorkflow {
 
             state = StoryState.REVIEW;
             ReviewResult review = build.review(story, criteria, agent, devAttempts);
+            costUsd += review.costUsd();
             if (!review.matchesCriteria()) {
                 previousFailure = review.verdict();
                 if (!absorbFailure(previousFailure)) {
@@ -244,10 +250,15 @@ public class StoryWorkflowImpl implements StoryWorkflow {
                 story == null ? "" : story.id(),
                 story == null ? 0 : story.tier(),
                 agent, state, devAttempts, qaRuns, reworkLoops,
-                autoApproved, round2(costUsd), note);
+                autoApproved, round4(costUsd), note);
     }
 
-    private static double round2(double v) {
-        return Math.round(v * 100.0) / 100.0;
+    /**
+     * Four places, not two. A cheap agent's call costs a fraction of a cent, and rounding
+     * to currency makes real spend display as zero - which reads exactly like cost tracking
+     * that was never wired. Sum first, round at the edge.
+     */
+    private static double round4(double v) {
+        return Math.round(v * 10_000.0) / 10_000.0;
     }
 }
