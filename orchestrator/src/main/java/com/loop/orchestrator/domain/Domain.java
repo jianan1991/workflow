@@ -68,6 +68,68 @@ public final class Domain {
     public record Answer(String questionId, String answer) {
     }
 
+    // ------------------------------------------------------ acceptance criteria
+
+    /**
+     * How a criterion can be verified — decided when it is <b>written</b>, not when QA
+     * runs. Classifying late means discovering your exposure at the end of an epic instead
+     * of at the gate before any code exists.
+     */
+    public enum Testability {
+        /** QA boots the app, calls it, asserts. "429 returned after 100 requests in 60s." */
+        AUTOMATED,
+        /** QA can capture the output but not judge it. "The error message is clear." */
+        OBSERVABLE,
+        /** Needs a third-party sandbox, production data volumes, or a browser. */
+        UNREACHABLE,
+        /** Judgement. Wording, feel, whether a default value is sensible. */
+        HUMAN_ONLY
+    }
+
+    /**
+     * @param kbSources knowledge-base files this rests on. A non-obvious decision with no
+     *                  citation is the signal to ask a person rather than to invent one —
+     *                  it is the closest thing this pipeline has to an agent knowing that
+     *                  it does not know.
+     */
+    public record AcceptanceCriterion(String id,
+                                      String text,
+                                      Testability testability,
+                                      List<String> kbSources) {
+    }
+
+    /** What the gate-1 screen shows: your manual exposure, before anything is built. */
+    public record TestabilitySplit(int automated, int observable, int unreachable, int humanOnly) {
+
+        public static TestabilitySplit of(List<AcceptanceCriterion> criteria) {
+            int automated = 0;
+            int observable = 0;
+            int unreachable = 0;
+            int humanOnly = 0;
+            for (AcceptanceCriterion criterion : criteria) {
+                switch (criterion.testability()) {
+                    case AUTOMATED -> automated++;
+                    case OBSERVABLE -> observable++;
+                    case UNREACHABLE -> unreachable++;
+                    case HUMAN_ONLY -> humanOnly++;
+                }
+            }
+            return new TestabilitySplit(automated, observable, unreachable, humanOnly);
+        }
+
+        public int total() {
+            return automated + observable + unreachable + humanOnly;
+        }
+
+        /**
+         * The metric to watch. If it stops climbing, criteria are being written too
+         * vaguely — a BA problem, not a QA one.
+         */
+        public double automatedShare() {
+            return total() == 0 ? 0.0 : (double) automated / total();
+        }
+    }
+
     // ---------------------------------------------------------------- stories
 
     /**

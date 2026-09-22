@@ -1,5 +1,7 @@
 package com.loop.orchestrator.config;
 
+import com.loop.orchestrator.agent.ArchitectAgent;
+import com.loop.orchestrator.agent.BaAgent;
 import com.loop.orchestrator.agent.PmAgent;
 import com.loop.orchestrator.cost.AgentCostModel;
 import com.loop.orchestrator.knowledge.KnowledgeIndexer;
@@ -79,6 +81,36 @@ public class LlmConfig {
         return new LiteLlmChatModel(baseUrl, apiKey, agentToTier);
     }
 
+    /**
+     * Criteria for one stage, with a deliberately mixed testability split. A script where
+     * everything is AUTOMATED would hide the thing the gate-1 screen exists to show: how
+     * much of an epic lands on a person whatever the agents do.
+     */
+    private static final String SCRIPTED_BA_CRITERIA = """
+            {"criteria":[
+              {"text":"The 101st request in a 60 second window returns 429 with a Retry-After header.",
+               "testability":"AUTOMATED","sources":["throttling-policy.md"]},
+              {"text":"Two API keys belonging to one tenant draw from a single bucket.",
+               "testability":"AUTOMATED","sources":["throttling-policy.md"]},
+              {"text":"The 429 body states current usage and when the limit resets.",
+               "testability":"AUTOMATED","sources":[]},
+              {"text":"The 429 message is clear enough that a developer knows what to do next.",
+               "testability":"HUMAN_ONLY","sources":[]}
+            ],
+             "unanswerable":[]}
+            """;
+
+    /** Four stories, two tiers, a real dependency chain, and no structural change. */
+    private static final String SCRIPTED_ARCHITECT_STORIES = """
+            {"structural":true,
+             "stories":[
+              {"id":"S-1","title":"Tenant config lookup","tier":1,"dependsOn":[]},
+              {"id":"S-2","title":"Token bucket primitive","tier":1,"dependsOn":[]},
+              {"id":"S-3","title":"Redis-backed limiter","tier":2,"dependsOn":["S-2"]},
+              {"id":"S-4","title":"Key on tenant identity","tier":2,"dependsOn":["S-1"]}
+            ]}
+            """;
+
     private static ScriptedChatModel scripted() {
         Map<String, java.util.function.Function<ChatModel.ChatRequest, String>> script =
                 new LinkedHashMap<>();
@@ -90,7 +122,25 @@ public class LlmConfig {
                         ? SCRIPTED_PM_JOURNEY_SETTLED
                         : SCRIPTED_PM_JOURNEY);
 
+        script.put(BaAgent.NAME, request -> SCRIPTED_BA_CRITERIA);
+
+        // Story ids are rewritten to the epic's own prefix, so the scripted graph stays
+        // valid whatever epic runs through it.
+        script.put(ArchitectAgent.NAME, request ->
+                SCRIPTED_ARCHITECT_STORIES.replace("S-", epicPrefix(request.user()) + "-"));
+
         return new ScriptedChatModel(script);
+    }
+
+    /** Pulls the epic id back out of the prompt the architect was given. */
+    static String epicPrefix(String prompt) {
+        int start = prompt.indexOf("# Epic ");
+        if (start < 0) {
+            return "EPIC";
+        }
+        int from = start + "# Epic ".length();
+        int colon = prompt.indexOf(':', from);
+        return colon < 0 ? "EPIC" : prompt.substring(from, colon).trim();
     }
 
     /**
@@ -120,5 +170,19 @@ public class LlmConfig {
                            KnowledgeIndexer knowledge,
                            @Value("${llm.max-output-tokens:4096}") int maxOutputTokens) {
         return new PmAgent(chatModel, knowledge, maxOutputTokens);
+    }
+
+    @Bean
+    public BaAgent baAgent(ChatModel chatModel,
+                           KnowledgeIndexer knowledge,
+                           @Value("${llm.max-output-tokens:4096}") int maxOutputTokens) {
+        return new BaAgent(chatModel, knowledge, maxOutputTokens);
+    }
+
+    @Bean
+    public ArchitectAgent architectAgent(ChatModel chatModel,
+                                         KnowledgeIndexer knowledge,
+                                         @Value("${llm.max-output-tokens:4096}") int maxOutputTokens) {
+        return new ArchitectAgent(chatModel, knowledge, maxOutputTokens);
     }
 }

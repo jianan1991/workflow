@@ -175,7 +175,7 @@ public class EpicWorkflowImpl implements EpicWorkflow {
      * reference to something that was not decomposed — is placed in the final layer rather
      * than dropped, so it surfaces as a failure instead of vanishing.
      */
-    static List<List<Story>> dependencyLayers(List<Story> stories) {
+    public static List<List<Story>> dependencyLayers(List<Story> stories) {
         List<List<Story>> layers = new ArrayList<>();
         List<Story> remaining = new ArrayList<>(stories);
         Set<String> placed = new HashSet<>();

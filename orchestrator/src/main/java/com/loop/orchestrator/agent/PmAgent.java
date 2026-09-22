@@ -111,20 +111,20 @@ public class PmAgent {
     }
 
     static Journey parse(String reply, String epicId) {
-        String cleaned = stripFence(reply);
+        String cleaned = AgentReply.stripFence(reply);
 
         JsonNode root;
         try {
             root = JSON.readTree(cleaned);
         } catch (JsonProcessingException e) {
             throw new AgentReplyException(NAME, epicId,
-                    "reply was not valid JSON: " + preview(cleaned), e);
+                    "reply was not valid JSON: " + AgentReply.preview(cleaned), e);
         }
 
         JsonNode stages = root.path("stages");
         if (!stages.isArray() || stages.isEmpty()) {
             throw new AgentReplyException(NAME, epicId,
-                    "reply had no stages array: " + preview(cleaned), null);
+                    "reply had no stages array: " + AgentReply.preview(cleaned), null);
         }
 
         List<JourneyStage> parsed = new ArrayList<>();
@@ -150,31 +150,4 @@ public class PmAgent {
         return new Journey(List.copyOf(parsed));
     }
 
-    /** Models sometimes wrap JSON in a code fence despite being asked not to. */
-    private static String stripFence(String reply) {
-        String trimmed = reply == null ? "" : reply.trim();
-        if (!trimmed.startsWith("```")) {
-            return trimmed;
-        }
-        int firstNewline = trimmed.indexOf('\n');
-        int lastFence = trimmed.lastIndexOf("```");
-        if (firstNewline < 0 || lastFence <= firstNewline) {
-            return trimmed;
-        }
-        return trimmed.substring(firstNewline + 1, lastFence).trim();
-    }
-
-    private static String preview(String text) {
-        if (text == null || text.isBlank()) {
-            return "(empty)";
-        }
-        return text.length() <= 200 ? text : text.substring(0, 200) + "...";
-    }
-
-    /** Carries enough context to debug from the log alone. */
-    public static class AgentReplyException extends RuntimeException {
-        public AgentReplyException(String agent, String epicId, String detail, Throwable cause) {
-            super("[%s] unusable reply for %s — %s".formatted(agent, epicId, detail), cause);
-        }
-    }
 }

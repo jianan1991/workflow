@@ -156,7 +156,7 @@ class PmAgentTest {
         void notJson() {
             assertThatThrownBy(() -> agentReplying("Sure! Here is the journey:")
                     .mapJourney(EPIC, List.of()))
-                    .isInstanceOf(PmAgent.AgentReplyException.class)
+                    .isInstanceOf(AgentReplyException.class)
                     .hasMessageContaining("not valid JSON")
                     .hasMessageContaining("LOOP-14");
         }
@@ -165,7 +165,7 @@ class PmAgentTest {
         @DisplayName("JSON, but no stages")
         void noStages() {
             assertThatThrownBy(() -> agentReplying("{\"journey\":[]}").mapJourney(EPIC, List.of()))
-                    .isInstanceOf(PmAgent.AgentReplyException.class)
+                    .isInstanceOf(AgentReplyException.class)
                     .hasMessageContaining("no stages array");
         }
 
@@ -179,7 +179,7 @@ class PmAgentTest {
 
             assertThatThrownBy(() -> agentReplying(reply).mapJourney(EPIC, List.of()))
                     .as("defaulting here would release an epic with an open question inside it")
-                    .isInstanceOf(PmAgent.AgentReplyException.class)
+                    .isInstanceOf(AgentReplyException.class)
                     .hasMessageContaining("expected KNOWN, PARTIAL or GAP");
         }
 
@@ -187,7 +187,7 @@ class PmAgentTest {
         @DisplayName("an empty reply")
         void emptyReply() {
             assertThatThrownBy(() -> agentReplying("").mapJourney(EPIC, List.of()))
-                    .isInstanceOf(PmAgent.AgentReplyException.class);
+                    .isInstanceOf(AgentReplyException.class);
         }
     }
 
