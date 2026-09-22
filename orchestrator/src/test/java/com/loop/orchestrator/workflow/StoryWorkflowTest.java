@@ -1,12 +1,14 @@
 package com.loop.orchestrator.workflow;
 
 import com.loop.orchestrator.activity.StubBuildActivities;
+import com.loop.orchestrator.domain.Domain.AcceptanceCriterion;
 import com.loop.orchestrator.domain.Domain.Agent;
 import com.loop.orchestrator.domain.Domain.Gate;
 import com.loop.orchestrator.domain.Domain.GateDecision;
 import com.loop.orchestrator.domain.Domain.Story;
 import com.loop.orchestrator.domain.Domain.StoryState;
 import com.loop.orchestrator.domain.Domain.StoryStatus;
+import com.loop.orchestrator.domain.Domain.Testability;
 import io.temporal.client.WorkflowClient;
 import io.temporal.client.WorkflowOptions;
 import io.temporal.client.WorkflowStub;
@@ -26,6 +28,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 class StoryWorkflowTest {
 
     private static final String EPIC = "LOOP-14";
+
+    /** Every story needs criteria now — nothing downstream can judge one without them. */
+    private static final List<AcceptanceCriterion> CRITERIA = List.of(
+            new AcceptanceCriterion("AC-1", "The limiter rejects past the ceiling.",
+                    Testability.AUTOMATED, List.of()));
 
     private TestWorkflowEnvironment env;
 
@@ -104,9 +111,31 @@ class StoryWorkflowTest {
         assertThat(result.note()).contains("nobody reviewed");
     }
 
+    @Test
+    @DisplayName("a story with no criteria is blocked rather than built")
+    void noCriteriaBlocks() {
+        Story story = new Story("LOOP-14-9", "Something nobody specified", 1, List.of());
+
+        StoryStatus result = runToCompletion(story, List.of(), true);
+
+        assertThat(result.state())
+                .as("building it would pass review against nothing and reach a person "
+                        + "looking finished")
+                .isEqualTo(StoryState.BLOCKED);
+        assertThat(result.note()).contains("no acceptance criteria");
+        assertThat(result.devAttempts())
+                .as("no code should have been attempted at all")
+                .isZero();
+    }
+
     // ------------------------------------------------------------------ setup
 
     private StoryWorkflow start(Story story, boolean useTimeskipping) {
+        return start(story, CRITERIA, useTimeskipping);
+    }
+
+    private StoryWorkflow start(Story story, List<AcceptanceCriterion> criteria,
+                                boolean useTimeskipping) {
         env = TestWorkflowEnvironment.newInstance(
                 TestEnvironmentOptions.newBuilder()
                         .setUseTimeskipping(useTimeskipping)
@@ -126,12 +155,17 @@ class StoryWorkflowTest {
                         .setWorkflowExecutionTimeout(Duration.ofDays(30))
                         .build());
 
-        WorkflowClient.start(workflow::run, EPIC, story);
+        WorkflowClient.start(workflow::run, EPIC, story, criteria);
         return workflow;
     }
 
     private StoryStatus runToCompletion(Story story, boolean useTimeskipping) {
-        StoryWorkflow workflow = start(story, useTimeskipping);
+        return runToCompletion(story, CRITERIA, useTimeskipping);
+    }
+
+    private StoryStatus runToCompletion(Story story, List<AcceptanceCriterion> criteria,
+                                        boolean useTimeskipping) {
+        StoryWorkflow workflow = start(story, criteria, useTimeskipping);
         return WorkflowStub.fromTyped(workflow).getResult(StoryStatus.class);
     }
 

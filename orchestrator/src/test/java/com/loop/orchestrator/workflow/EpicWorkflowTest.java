@@ -99,6 +99,27 @@ class EpicWorkflowTest {
     }
 
     @Test
+    @DisplayName("the testability split is reported at the gate, before any code is written")
+    void testabilitySplitIsKnownUpfront() {
+        EpicWorkflow workflow = start(false);
+        WorkflowStub stub = WorkflowStub.fromTyped(workflow);
+
+        EpicStatus blocked = awaitStatus(workflow, s -> s.phase() == Phase.AWAITING_ANSWER);
+        workflow.answerQuestion(new Answer(blocked.openQuestion().id(), "Self-serve."));
+
+        EpicStatus atGate = awaitStatus(workflow, s -> s.phase() == Phase.EPIC_REVIEW);
+
+        assertThat(atGate.testability().total())
+                .as("knowing the manual exposure only after the build defeats the point")
+                .isGreaterThan(0);
+        assertThat(atGate.testability().humanOnly())
+                .as("a split that is entirely automated is hiding something")
+                .isGreaterThan(0);
+
+        stub.cancel();
+    }
+
+    @Test
     @DisplayName("stories run in dependency order, with independent ones together")
     void dependencyLayersRespectTheGraph() {
         List<Story> stories = List.of(

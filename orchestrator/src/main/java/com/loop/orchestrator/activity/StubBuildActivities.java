@@ -1,5 +1,6 @@
 package com.loop.orchestrator.activity;
 
+import com.loop.orchestrator.domain.Domain.AcceptanceCriterion;
 import com.loop.orchestrator.domain.Domain.Agent;
 import com.loop.orchestrator.domain.Domain.CiResult;
 import com.loop.orchestrator.domain.Domain.QaOutcome;
@@ -9,6 +10,8 @@ import com.loop.orchestrator.domain.Domain.Story;
 import com.loop.orchestrator.domain.Domain.StoryState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.List;
 
 /**
  * Stub build agents. Nothing is compiled, no container is started, no model is called.
@@ -59,7 +62,8 @@ public class StubBuildActivities implements BuildActivities {
     }
 
     @Override
-    public ReviewResult review(Story story, Agent author, int attempt) {
+    public ReviewResult review(Story story, List<AcceptanceCriterion> criteria,
+                               Agent author, int attempt) {
         boolean scopeExceeded = story.tier() == 2;
 
         ReviewResult result = scopeExceeded
@@ -72,7 +76,7 @@ public class StubBuildActivities implements BuildActivities {
     }
 
     @Override
-    public QaResult runQa(Story story, int attempt) {
+    public QaResult runQa(Story story, List<AcceptanceCriterion> criteria, int attempt) {
         if (story.title().startsWith(CRITERION_GAP_MARKER)) {
             // The code is not wrong. Nobody wrote the criterion that would have caught
             // this, so sending it back to a developer produces a second wrong answer.

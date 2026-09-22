@@ -11,7 +11,6 @@ import com.loop.orchestrator.domain.Domain.QaResult;
 import com.loop.orchestrator.domain.Domain.ReviewResult;
 import com.loop.orchestrator.domain.Domain.Story;
 import com.loop.orchestrator.domain.Domain.StoryState;
-import com.loop.orchestrator.domain.Domain.Testability;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -65,16 +64,16 @@ public class AgentBuildActivities implements BuildActivities {
     }
 
     @Override
-    public ReviewResult review(Story story, Agent author, int attempt) {
+    public ReviewResult review(Story story, List<AcceptanceCriterion> criteria,
+                               Agent author, int attempt) {
         // The diff is empty because nothing implemented the story. The reviewer is real and
         // will say so, which is the correct outcome rather than a convenient one.
-        return reviewer.review(story, criteriaFor(story), author,
+        return reviewer.review(story, criteria, author,
                 "(no diff — the dev agent is not wired)", List.of()).review();
     }
 
     @Override
-    public QaResult runQa(Story story, int attempt) {
-        List<AcceptanceCriterion> criteria = criteriaFor(story);
+    public QaResult runQa(Story story, List<AcceptanceCriterion> criteria, int attempt) {
         List<Observation> observations = observe(story, attempt);
 
         QaAgent.Result judged = qa.judge(story, criteria, observations);
@@ -111,23 +110,6 @@ public class AgentBuildActivities implements BuildActivities {
     public void writeBackDecision(String epicId, Story story, String decision) {
         log.info("[kb] {} would commit a decision from {}: {} (not yet wired)",
                 epicId, story.id(), decision);
-    }
-
-    /**
-     * Placeholder criteria so the reviewer and QA have something to judge against.
-     *
-     * <p>Real criteria come from the BA, per story, and must be carried on the story
-     * through the workflow. Until that is threaded through, this keeps the agents
-     * reachable — and it is why nothing here should be read as a QA result about real code.
-     */
-    private static List<AcceptanceCriterion> criteriaFor(Story story) {
-        return List.of(
-                new AcceptanceCriterion("AC-1",
-                        "The behaviour described by '" + story.title() + "' is implemented.",
-                        Testability.AUTOMATED, List.of()),
-                new AcceptanceCriterion("AC-2",
-                        "The change is confined to what the story asked for.",
-                        Testability.OBSERVABLE, List.of()));
     }
 
     /**

@@ -111,24 +111,18 @@ public class AgentPlanningActivities implements PlanningActivities {
         log.info("[board] {} -> {} ({})", epicId, phase, note);
     }
 
-    /**
-     * Writes acceptance criteria for every settled stage.
-     *
-     * <p>Not on the {@link PlanningActivities} interface yet — the workflow does not call
-     * the BA at all, which is the next thing to wire. Exposed so the agent is reachable
-     * and testable in the meantime rather than sitting dark.
-     */
-    public BaAgent.Result writeCriteria(Epic epic, JourneyStage stage) {
-        return ba.writeCriteria(epic, stage);
-    }
+    @Override
+    public List<AcceptanceCriterion> writeCriteria(Epic epic, Story story, Journey journey) {
+        BaAgent.Result result = ba.writeCriteria(epic, story, journey);
 
-    /** The exposure a person sees at gate 1, before any code is written. */
-    public TestabilitySplit testabilityOf(Epic epic, Journey journey) {
-        List<AcceptanceCriterion> all = new ArrayList<>();
-        journey.stages().stream()
-                .filter(stage -> stage.coverage() == com.loop.orchestrator.domain.Domain.Coverage.KNOWN)
-                .forEach(stage -> all.addAll(ba.writeCriteria(epic, stage).criteria()));
-        return TestabilitySplit.of(all);
+        if (!result.settled()) {
+            // Returning the partial criteria would be worse than returning none: the story
+            // would build and be judged against half a specification, and pass.
+            log.warn("[ba] {} not settled — {} open question(s): {}",
+                    story.id(), result.unanswerable().size(), result.unanswerable());
+            return List.of();
+        }
+        return result.criteria();
     }
 
     /**

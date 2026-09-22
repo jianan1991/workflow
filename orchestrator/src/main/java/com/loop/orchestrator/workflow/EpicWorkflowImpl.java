@@ -1,6 +1,7 @@
 package com.loop.orchestrator.workflow;
 
 import com.loop.orchestrator.activity.PlanningActivities;
+import com.loop.orchestrator.domain.Domain.AcceptanceCriterion;
 import com.loop.orchestrator.domain.Domain.Answer;
 import com.loop.orchestrator.domain.Domain.Epic;
 import com.loop.orchestrator.domain.Domain.EpicStatus;
@@ -13,6 +14,7 @@ import com.loop.orchestrator.domain.Domain.Phase;
 import com.loop.orchestrator.domain.Domain.Question;
 import com.loop.orchestrator.domain.Domain.Story;
 import com.loop.orchestrator.domain.Domain.StoryState;
+import com.loop.orchestrator.domain.Domain.TestabilitySplit;
 import com.loop.orchestrator.domain.Domain.StoryStatus;
 import io.temporal.activity.ActivityOptions;
 import io.temporal.common.RetryOptions;
@@ -86,6 +88,8 @@ public class EpicWorkflowImpl implements EpicWorkflow {
     private Journey journey;
     private Question openQuestion;
     private List<Story> stories = List.of();
+    private final Map<String, List<AcceptanceCriterion>> criteria = new LinkedHashMap<>();
+    private TestabilitySplit testability = new TestabilitySplit(0, 0, 0, 0);
     private final List<StoryStatus> storyStatuses = new ArrayList<>();
     private Estimate estimate;
     private int questionsAsked;
@@ -105,6 +109,11 @@ public class EpicWorkflowImpl implements EpicWorkflow {
         move(Phase.DECOMPOSING, "architect decomposing against the code index");
         stories = planning.decompose(epic, journey);
 
+        move(Phase.DECOMPOSING, "BA writing acceptance criteria per story");
+        if (!writeCriteria(epic)) {
+            return status();
+        }
+
         move(Phase.ESTIMATING, "forecasting cost and human minutes");
         estimate = planning.estimate(epic.id(), stories, REWORK_MULTIPLIER);
 
@@ -112,10 +121,41 @@ public class EpicWorkflowImpl implements EpicWorkflow {
             return status();
         }
 
-        move(Phase.BUILDING, "%d stories, estimated $%.2f and %d human minutes"
-                .formatted(stories.size(), estimate.dollars(), estimate.humanMinutes()));
+        move(Phase.BUILDING, ("%d stories, estimated $%.2f and %d human minutes; %d of %d "
+                + "criteria need a person whatever the agents do")
+                .formatted(stories.size(), estimate.dollars(), estimate.humanMinutes(),
+                        testability.total() - testability.automated(), testability.total()));
         buildStories();
         return status();
+    }
+
+    /**
+     * Writes acceptance criteria for every story, and records the testability split.
+     *
+     * <p>The split is what a person sees at gate 1: how much of this epic lands on a human
+     * whatever the agents do. Shown before any code is written, so the exposure is known
+     * upfront rather than discovered at the end.
+     *
+     * @return false when a story could not be settled, which stops the epic
+     */
+    private boolean writeCriteria(Epic epic) {
+        List<AcceptanceCriterion> all = new ArrayList<>();
+
+        for (Story story : stories) {
+            List<AcceptanceCriterion> written = planning.writeCriteria(epic, story, journey);
+            if (written.isEmpty()) {
+                // Building a story nobody can judge is worse than not building it. It would
+                // pass review against nothing and reach a person looking finished.
+                move(Phase.ABANDONED, "the BA could not settle " + story.id()
+                        + " - it needs a person before anything is built");
+                return false;
+            }
+            criteria.put(story.id(), written);
+            all.addAll(written);
+        }
+
+        testability = TestabilitySplit.of(all);
+        return true;
     }
 
     /**
@@ -141,7 +181,8 @@ public class EpicWorkflowImpl implements EpicWorkflow {
                         ChildWorkflowOptions.newBuilder()
                                 .setWorkflowId(StoryWorkflow.workflowId(epicId, story.id()))
                                 .build());
-                running.add(Async.function(child::run, epicId, story));
+                running.add(Async.function(child::run, epicId, story,
+                        criteria.getOrDefault(story.id(), List.of())));
             }
 
             Promise.allOf(running).get();
@@ -296,7 +337,7 @@ public class EpicWorkflowImpl implements EpicWorkflow {
         return new EpicStatus(
                 epicId, phase, journey, openQuestion,
                 new ArrayList<>(stories), new ArrayList<>(storyStatuses),
-                estimate, questionsAsked, note);
+                estimate, testability, questionsAsked, note);
     }
 
     private void move(Phase next, String why) {

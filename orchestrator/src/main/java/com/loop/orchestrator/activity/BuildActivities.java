@@ -1,5 +1,6 @@
 package com.loop.orchestrator.activity;
 
+import com.loop.orchestrator.domain.Domain.AcceptanceCriterion;
 import com.loop.orchestrator.domain.Domain.Agent;
 import com.loop.orchestrator.domain.Domain.CiResult;
 import com.loop.orchestrator.domain.Domain.QaResult;
@@ -7,6 +8,8 @@ import com.loop.orchestrator.domain.Domain.ReviewResult;
 import com.loop.orchestrator.domain.Domain.Story;
 import com.loop.orchestrator.domain.Domain.StoryState;
 import io.temporal.activity.ActivityInterface;
+
+import java.util.List;
 
 /**
  * The build and check half of the pipeline. Same determinism rule as
@@ -35,7 +38,8 @@ public interface BuildActivities {
     CiResult runCi(Story story, int attempt);
 
     /** Reviewer agent. Runs on a different model family from whichever agent authored. */
-    ReviewResult review(Story story, Agent author, int attempt);
+    ReviewResult review(Story story, List<AcceptanceCriterion> criteria,
+                        Agent author, int attempt);
 
     /**
      * QA agent. Boots the app against a throwaway database, calls the real endpoints, and
@@ -43,7 +47,7 @@ public interface BuildActivities {
      * dev agent's own tests. If the agent writes the tests and QA confirms they pass,
      * nothing has been measured.
      */
-    QaResult runQa(Story story, int attempt);
+    QaResult runQa(Story story, List<AcceptanceCriterion> criteria, int attempt);
 
     /**
      * Decide whether this story may merge without a person.

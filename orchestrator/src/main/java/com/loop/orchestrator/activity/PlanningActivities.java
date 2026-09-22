@@ -1,5 +1,6 @@
 package com.loop.orchestrator.activity;
 
+import com.loop.orchestrator.domain.Domain.AcceptanceCriterion;
 import com.loop.orchestrator.domain.Domain.Answer;
 import com.loop.orchestrator.domain.Domain.Epic;
 import com.loop.orchestrator.domain.Domain.Estimate;
@@ -59,6 +60,18 @@ public interface PlanningActivities {
      * is both slower and wrong more often.
      */
     List<Story> decompose(Epic epic, Journey journey);
+
+    /**
+     * BA agent. Turns a story into testable acceptance criteria.
+     *
+     * <p>Everything downstream is judged against these. Without them the reviewer is asked
+     * whether a diff satisfies requirements nobody wrote, and QA reports on criteria it
+     * invented - both produce confident output that means nothing.
+     *
+     * @return empty when the agent could not settle the story. That is the signal to raise
+     *         a question, not to proceed with a guess.
+     */
+    List<AcceptanceCriterion> writeCriteria(Epic epic, Story story, Journey journey);
 
     /**
      * Cost and human-time forecast, produced before any code exists so gate 1 can see it.

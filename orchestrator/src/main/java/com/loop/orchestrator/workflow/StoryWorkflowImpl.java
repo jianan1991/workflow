@@ -1,6 +1,7 @@
 package com.loop.orchestrator.workflow;
 
 import com.loop.orchestrator.activity.BuildActivities;
+import com.loop.orchestrator.domain.Domain.AcceptanceCriterion;
 import com.loop.orchestrator.domain.Domain.Agent;
 import com.loop.orchestrator.domain.Domain.CiResult;
 import com.loop.orchestrator.domain.Domain.Gate;
@@ -16,6 +17,7 @@ import io.temporal.workflow.Workflow;
 import org.slf4j.Logger;
 
 import java.time.Duration;
+import java.util.List;
 
 /**
  * The rework loop.
@@ -62,6 +64,7 @@ public class StoryWorkflowImpl implements StoryWorkflow {
 
     private String epicId = "";
     private Story story;
+    private List<AcceptanceCriterion> criteria = List.of();
     private Agent agent = Agent.MID;
     private StoryState state = StoryState.QUEUED;
     private int devAttempts;
@@ -75,9 +78,17 @@ public class StoryWorkflowImpl implements StoryWorkflow {
     private GateDecision prDecision;
 
     @Override
-    public StoryStatus run(String epicId, Story story) {
+    public StoryStatus run(String epicId, Story story, List<AcceptanceCriterion> criteria) {
         this.epicId = epicId;
         this.story = story;
+        this.criteria = criteria == null ? List.of() : criteria;
+
+        if (this.criteria.isEmpty()) {
+            // Nothing downstream can judge this story. The reviewer would be asked whether
+            // a diff satisfies requirements nobody wrote, and QA would refuse outright.
+            return block("no acceptance criteria - the BA did not settle this story, so "
+                    + "there is nothing for the reviewer or QA to judge against");
+        }
         // Tier 1 is mechanical and single-module. Tier 2 is cross-cutting, ambiguous, or
         // touching shared abstractions.
         this.agent = story.tier() == 1 ? Agent.MID : Agent.SENIOR;
@@ -101,7 +112,7 @@ public class StoryWorkflowImpl implements StoryWorkflow {
             }
 
             state = StoryState.REVIEW;
-            ReviewResult review = build.review(story, agent, devAttempts);
+            ReviewResult review = build.review(story, criteria, agent, devAttempts);
             if (!review.matchesCriteria()) {
                 previousFailure = review.verdict();
                 if (!absorbFailure(previousFailure)) {
@@ -112,7 +123,7 @@ public class StoryWorkflowImpl implements StoryWorkflow {
 
             state = StoryState.QA;
             qaRuns++;
-            QaResult qa = build.runQa(story, qaRuns);
+            QaResult qa = build.runQa(story, criteria, qaRuns);
             costUsd += qa.costUsd();
 
             switch (qa.outcome()) {

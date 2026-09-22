@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.loop.orchestrator.domain.Domain.AcceptanceCriterion;
 import com.loop.orchestrator.domain.Domain.Epic;
+import com.loop.orchestrator.domain.Domain.Journey;
 import com.loop.orchestrator.domain.Domain.JourneyStage;
+import com.loop.orchestrator.domain.Domain.Story;
 import com.loop.orchestrator.domain.Domain.Testability;
 import com.loop.orchestrator.knowledge.Knowledge.Hit;
 import com.loop.orchestrator.knowledge.KnowledgeIndexer;
@@ -91,6 +93,51 @@ public class BaAgent {
         return result;
     }
 
+    /**
+     * Criteria for one story, with the settled journey as context.
+     *
+     * <p>Per story rather than per stage: the story is what gets built, reviewed and
+     * tested, and criteria that belong to a stage spanning three stories cannot tell any of
+     * them when it is done.
+     */
+    public Result writeCriteria(Epic epic, Story story, Journey journey) {
+        List<Hit> context = knowledge.search(story.title() + "\n" + epic.title(), 6);
+
+        ChatModel.ChatResponse response = model.complete(new ChatModel.ChatRequest(
+                NAME, SYSTEM, buildStoryPrompt(epic, story, journey, context), maxOutputTokens));
+
+        Result result = parse(response.text(), epic.id(), 0);
+        log.info("[ba] {} - {} criteria ({} automated), {} unanswerable, {} in / {} out",
+                story.id(), result.criteria().size(), result.split().automated(),
+                result.unanswerable().size(), response.inputTokens(), response.outputTokens());
+        return result;
+    }
+
+    String buildStoryPrompt(Epic epic, Story story, Journey journey, List<Hit> context) {
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("# Epic ").append(epic.id()).append(": ").append(epic.title())
+                .append("\n\n").append(epic.body()).append("\n\n");
+
+        prompt.append("# The story you are writing criteria for\n\n")
+                .append(story.id()).append(": ").append(story.title())
+                .append("\nTier ").append(story.tier()).append("\n");
+
+        if (!story.dependsOn().isEmpty()) {
+            // Without this the agent writes criteria covering work another story owns, and
+            // two stories end up asserting the same behaviour.
+            prompt.append("\nAssume ").append(String.join(", ", story.dependsOn()))
+                    .append(" is already done. Do not restate what those stories cover.\n");
+        }
+
+        prompt.append("\n# The customer journey this sits in\n\n");
+        journey.stages().forEach(stage -> prompt
+                .append(stage.index()).append(". ").append(stage.name())
+                .append(" - ").append(stage.description()).append("\n"));
+
+        appendContext(prompt, context);
+        return prompt.toString();
+    }
+
     String buildPrompt(Epic epic, JourneyStage stage, List<Hit> context) {
         StringBuilder prompt = new StringBuilder();
         prompt.append("# Epic ").append(epic.id()).append(": ").append(epic.title())
@@ -100,6 +147,11 @@ public class BaAgent {
                 .append("Stage ").append(stage.index()).append(": ").append(stage.name())
                 .append("\n").append(stage.description()).append("\n");
 
+        appendContext(prompt, context);
+        return prompt.toString();
+    }
+
+    private static void appendContext(StringBuilder prompt, List<Hit> context) {
         if (!context.isEmpty()) {
             prompt.append("\n# Knowledge base\n\nCite these by filename.\n\n");
             for (Hit hit : context) {
@@ -112,11 +164,9 @@ public class BaAgent {
         } else {
             // Saying so beats silence. An agent given no context and no warning will write
             // confident criteria out of nothing.
-            prompt.append("\n# Knowledge base\n\nNothing was found for this stage. Treat every "
+            prompt.append("\n# Knowledge base\n\nNothing was found for this. Treat every "
                     + "non-obvious decision as unanswerable rather than guessing.\n");
         }
-
-        return prompt.toString();
     }
 
     static Result parse(String reply, String epicId, int stageIndex) {

@@ -2,6 +2,7 @@ package com.loop.orchestrator.activity;
 
 import com.loop.orchestrator.cost.AgentCostModel;
 import com.loop.orchestrator.cost.EstimateCalculator;
+import com.loop.orchestrator.domain.Domain.AcceptanceCriterion;
 import com.loop.orchestrator.domain.Domain.Answer;
 import com.loop.orchestrator.domain.Domain.Coverage;
 import com.loop.orchestrator.domain.Domain.Epic;
@@ -11,6 +12,7 @@ import com.loop.orchestrator.domain.Domain.JourneyStage;
 import com.loop.orchestrator.domain.Domain.Phase;
 import com.loop.orchestrator.domain.Domain.Question;
 import com.loop.orchestrator.domain.Domain.Story;
+import com.loop.orchestrator.domain.Domain.Testability;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -129,6 +131,19 @@ public class StubPlanningActivities implements PlanningActivities {
                 new Story(epic.id() + "-4", "Key on tenant identity", 2, List.of(epic.id() + "-1")),
                 new Story(epic.id() + "-5", "Limits overview screen", 1, List.of(epic.id() + "-3")),
                 new Story(epic.id() + "-6", "Request and approval flow", 1, List.of(epic.id() + "-5")));
+    }
+
+    @Override
+    public List<AcceptanceCriterion> writeCriteria(Epic epic, Story story, Journey journey) {
+        // A deliberately mixed split. Criteria that were all AUTOMATED would hide the thing
+        // gate 1 exists to show: how much of an epic lands on a person regardless.
+        return List.of(
+                new AcceptanceCriterion("AC-1",
+                        story.title() + " behaves as described.",
+                        Testability.AUTOMATED, List.of("kb/throttling-policy.md")),
+                new AcceptanceCriterion("AC-2",
+                        "The wording is clear enough to act on.",
+                        Testability.HUMAN_ONLY, List.of()));
     }
 
     @Override

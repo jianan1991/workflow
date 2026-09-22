@@ -267,6 +267,7 @@ public final class Domain {
                              List<Story> stories,
                              List<StoryStatus> storyStatuses,
                              Estimate estimate,
+                             TestabilitySplit testability,
                              int questionsAsked,
                              String note) {
     }

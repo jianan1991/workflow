@@ -6,6 +6,7 @@ import com.loop.orchestrator.agent.PmAgent;
 import com.loop.orchestrator.agent.QaAgent;
 import com.loop.orchestrator.agent.ReviewerAgent;
 import com.loop.orchestrator.cost.AgentCostModel;
+import com.loop.orchestrator.domain.Domain.AcceptanceCriterion;
 import com.loop.orchestrator.domain.Domain.Agent;
 import com.loop.orchestrator.domain.Domain.Coverage;
 import com.loop.orchestrator.domain.Domain.Epic;
@@ -15,6 +16,7 @@ import com.loop.orchestrator.domain.Domain.QaOutcome;
 import com.loop.orchestrator.domain.Domain.Question;
 import com.loop.orchestrator.domain.Domain.QaResult;
 import com.loop.orchestrator.domain.Domain.Story;
+import com.loop.orchestrator.domain.Domain.Testability;
 import com.loop.orchestrator.knowledge.HashingEmbedder;
 import com.loop.orchestrator.knowledge.InMemoryVectorStore;
 import com.loop.orchestrator.knowledge.KnowledgeIndexer;
@@ -189,10 +191,16 @@ class AgentActivitiesTest {
         private static final Story STORY =
                 new Story("LOOP-14-3", "Redis-backed limiter", 2, List.of());
 
+        private static final List<AcceptanceCriterion> CRITERIA = List.of(
+                new AcceptanceCriterion("AC-1", "Rejects past the ceiling.",
+                        Testability.AUTOMATED, List.of()),
+                new AcceptanceCriterion("AC-2", "Change stays in scope.",
+                        Testability.OBSERVABLE, List.of()));
+
         @Test
         @DisplayName("review goes through the reviewer agent")
         void reviewGoesThroughTheAgent() {
-            var review = build().review(STORY, Agent.SENIOR, 1);
+            var review = build().review(STORY, CRITERIA, Agent.SENIOR, 1);
 
             assertThat(model.agentsCalled).containsExactly(ReviewerAgent.NAME);
             assertThat(review.verdict()).isNotBlank();
@@ -201,7 +209,7 @@ class AgentActivitiesTest {
         @Test
         @DisplayName("QA reports UNVERIFIABLE while nothing runs the software — it does not report green")
         void qaDoesNotReportGreenOnNothing() {
-            QaResult result = build().runQa(STORY, 1);
+            QaResult result = build().runQa(STORY, CRITERIA, 1);
 
             assertThat(model.agentsCalled).containsExactly(QaAgent.NAME);
             assertThat(result.unverifiableCount())
@@ -216,7 +224,7 @@ class AgentActivitiesTest {
         @Test
         @DisplayName("a tier 2 story never auto-approves, whatever the reviewer says")
         void tierTwoNeverAutoApproves() {
-            var review = build().review(STORY, Agent.SENIOR, 1);
+            var review = build().review(STORY, CRITERIA, Agent.SENIOR, 1);
             var ci = build().runCi(STORY, 1);
 
             assertThat(build().mayAutoApprove(STORY, review, ci)).isFalse();
