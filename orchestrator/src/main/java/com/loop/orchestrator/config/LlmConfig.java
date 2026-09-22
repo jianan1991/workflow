@@ -3,6 +3,8 @@ package com.loop.orchestrator.config;
 import com.loop.orchestrator.agent.ArchitectAgent;
 import com.loop.orchestrator.agent.BaAgent;
 import com.loop.orchestrator.agent.PmAgent;
+import com.loop.orchestrator.agent.QaAgent;
+import com.loop.orchestrator.agent.ReviewerAgent;
 import com.loop.orchestrator.cost.AgentCostModel;
 import com.loop.orchestrator.knowledge.KnowledgeIndexer;
 import com.loop.orchestrator.llm.ChatModel;
@@ -111,6 +113,13 @@ public class LlmConfig {
             ]}
             """;
 
+    /** Correct, but touching config it was not asked to touch - so no auto-approval. */
+    private static final String SCRIPTED_REVIEW = """
+            {"matchesCriteria":true,"scopeExceeded":true,
+             "verdict":"Correct, but it edits application.yml, which the story did not authorise. Look hardest at the Redis failure path: it fails open.",
+             "unmetCriteria":[],"outOfScopeFiles":["application.yml"]}
+            """;
+
     private static ScriptedChatModel scripted() {
         Map<String, java.util.function.Function<ChatModel.ChatRequest, String>> script =
                 new LinkedHashMap<>();
@@ -128,6 +137,13 @@ public class LlmConfig {
         // valid whatever epic runs through it.
         script.put(ArchitectAgent.NAME, request ->
                 SCRIPTED_ARCHITECT_STORIES.replace("S-", epicPrefix(request.user()) + "-"));
+
+        script.put(ReviewerAgent.NAME, request -> SCRIPTED_REVIEW);
+
+        // QA has to answer every criterion it was given, so the scripted reply is built
+        // from the prompt rather than fixed - a canned list would fail its own completeness
+        // check the moment the criteria changed.
+        script.put(QaAgent.NAME, QaAgentScript::replyFor);
 
         return new ScriptedChatModel(script);
     }
@@ -177,6 +193,19 @@ public class LlmConfig {
                            KnowledgeIndexer knowledge,
                            @Value("${llm.max-output-tokens:4096}") int maxOutputTokens) {
         return new BaAgent(chatModel, knowledge, maxOutputTokens);
+    }
+
+    @Bean
+    public ReviewerAgent reviewerAgent(
+            ChatModel chatModel,
+            @Value("${llm.max-output-tokens:4096}") int maxOutputTokens) {
+        return new ReviewerAgent(chatModel, maxOutputTokens);
+    }
+
+    @Bean
+    public QaAgent qaAgent(ChatModel chatModel,
+                           @Value("${llm.max-output-tokens:4096}") int maxOutputTokens) {
+        return new QaAgent(chatModel, maxOutputTokens);
     }
 
     @Bean

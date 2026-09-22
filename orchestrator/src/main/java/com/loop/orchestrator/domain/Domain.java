@@ -207,6 +207,21 @@ public final class Domain {
                            int durationSeconds) {
     }
 
+    /**
+     * What QA saw when it actually exercised the system — a real HTTP response, a log
+     * line, a database row. Gathered by running the software, not by asking a model.
+     *
+     * <p>The split matters: booting the app and calling it is deterministic work that
+     * belongs in an activity, and judging the result against a criterion is what a model
+     * is for. Conflating them produces an agent that reports on tests it never ran.
+     */
+    public record Observation(String what, String evidence) {
+    }
+
+    /** One criterion, judged. */
+    public record CriterionVerdict(String criterionId, QaOutcome outcome, String evidence) {
+    }
+
     public enum StoryState {
         QUEUED, IMPLEMENTING, CI, REVIEW, QA,
         AWAITING_PR_REVIEW, MERGED, BLOCKED, RETURNED_TO_PM

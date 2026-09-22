@@ -54,10 +54,10 @@ boundaries rot between them.
 | 3 · Retrieval | ◐ automated + integration green, manual pass outstanding | 2026-09-22 |
 | 4 · Orchestration, stub agents | ☑ **done** | 2026-09-22 |
 | 5 · CI gates | ◐ gate proven, CI wiring outstanding | 2026-09-22 |
-| 6 · PM agent | ☐ not started | — |
-| 7 · Architect | ☐ not started | — |
+| 6 · PM agent | ◐ written and tested scripted; needs a key to judge | 2026-09-22 |
+| 7 · Architect | ◐ written and tested scripted; needs a key to judge | 2026-09-22 |
 | 8 · First dev agent | ☐ not started | — |
-| 9 · Reviewer and QA | ☐ not started | — |
+| 9 · Reviewer and QA | ◐ written and tested scripted; needs a key to judge | 2026-09-22 |
 | 10 · Escalation and write-back | ☐ not started | — |
 | 11 · Auto-approval | ☐ not started | — |
 | 12 · Blast radius | ☐ not started | — |
@@ -85,6 +85,31 @@ millisecond.
 **Stubs are permanent, not scaffolding.** Every agent has a deterministic stub that fails in
 a defined pattern — they are how orchestration stays testable after the real agents arrive.
 A stub that always succeeds tests nothing.
+
+### The scripted model, and the line it must not cross
+
+The fake sits at the **model** boundary, not the agent boundary:
+
+```
+PmAgent / BaAgent / ArchitectAgent / ReviewerAgent / QaAgent    real code
+  ↓
+ChatModel                                                       ← the seam
+  ↓
+ScriptedChatModel  |  LiteLlmChatModel
+```
+
+`llm.provider=scripted` is the default. No key, no network, no cost, and the whole pipeline
+runs end to end.
+
+**What it proves:** prompt assembly, retrieval reaching the prompt, parsing, every way a
+reply can be malformed, routing decisions, completeness checks, token usage reaching the
+cost path.
+
+**What it cannot prove:** whether any agent's answers are good. Not partially — not at all.
+A green suite here and a working agent are unrelated claims.
+
+This is why phases 6 to 9 stay ◐ with every automated box ticked. Writing the agent is not
+the phase; judging its output is, and that needs a key and a person.
 
 ---
 
@@ -303,11 +328,21 @@ line and checking what it does.
 
 **Exit checks**
 
-- [ ] Run against **five epics that already shipped**, where you know what was missed
-- [ ] For at least three of five, its gap questions include one a person would genuinely
-      have asked and nobody did
+- [x] `PmAgent` written - prompt assembly, retrieval, parsing, validation
+- [x] 12 tests scripted: the prompt carries the epic, the retrieved notes dated and
+      attributed, and human decisions last and marked settled; fences stripped; four ways a
+      reply can be unusable
+- [x] An unreadable `coverage` is rejected, never defaulted to KNOWN - defaulting would
+      release an epic to the architect with an open question inside it
+- [ ] **Run against real epics with a real model** (`llm.provider=litellm`)
+- [ ] Its gap questions include ones a person would genuinely have asked and nobody did
 - [ ] No question asks about something plainly stated in the epic
-- [ ] Cost per run recorded, and compared against the $0.71 the estimator assumes
+- [ ] Cost per run recorded and compared against the $0.09 the estimator assumes
+
+**Greenfield changes this check.** The original plan said "five epics that already
+shipped", so you would know the right answer in advance. There are none. The substitute:
+write three epics from real work you have done before, deliberately leaving out something
+you remember being bitten by, and see whether the agent asks about it.
 
 **Stop if:** its questions are generic ("what are the requirements?"). That is a prompt or
 retrieval problem, and shipping it means every downstream agent inherits invented
@@ -324,10 +359,21 @@ you are grading an exam you have not marked.
 
 **Exit checks**
 
-- [ ] Decompose three shipped epics; compare against what was actually built
-- [ ] No dependency ordering that would have been impossible
+- [x] `ArchitectAgent` written, with graph validation at the source
+- [x] 13 tests scripted, including four ways a graph would deadlock the build: dangling
+      references, self-dependency, cycles, duplicate ids. None of those fail loudly
+      downstream - the fan-out simply never schedules them and the epic looks busy
+- [x] One test runs the architect's real output through `EpicWorkflowImpl.dependencyLayers`
+      to prove what it produces is schedulable
+- [x] An out-of-range or missing tier is rejected, never defaulted to 1
+- [ ] Decompose real epics with a real model; compare against what you would have built
 - [ ] Tier assignments match a person's judgement on at least 70% of stories
-- [ ] The graph is derived from the code index, not from the model's reading of the epic
+- [ ] The graph is derived from a code index, not from the model's reading of the epic
+
+**Known shortcut, deliberately visible.** No code index exists, so the agent *guesses* the
+dependency graph and validation catches only structural mistakes, not semantic ones. Track
+how often an agent discovers mid-story that it needs something from a later story - that
+number is the cost of this shortcut.
 
 **Stop if:** dependencies are invented or missed. The compiler knows what imports what with
 certainty — paying a model to guess at it is slower and wrong more often.
@@ -367,9 +413,24 @@ compounds through every later phase.
 | Scope creep — edits an unrelated config file | catches | misses |
 | Meets the criteria, criteria are wrong | misses | catches, routes to the PM |
 
-- [ ] The pattern above holds
-- [ ] QA asserts against the PM journey and BA criteria, verified by reading its prompt
+- [x] `ReviewerAgent` and `QaAgent` written; 26 tests scripted between them
+- [x] QA is **structurally incapable** of seeing the dev agent's tests - it judges from
+      observations captured by running the software, and a test asserts the prompt never
+      contains them
+- [x] QA must answer **every** criterion it is given. A missing verdict is rejected: an
+      unchecked criterion would merge looking exactly like a passing one
+- [x] Routing order pinned by test - a wrong criterion outranks a code defect, because
+      rebuilding against a requirement nobody wanted changes nothing
+- [x] A reviewer reply that contradicts itself is rejected. Claiming the criteria are met
+      while listing unmet ones would otherwise merge on the optimistic half
+- [ ] Inject the four known defects with a real model; confirm the pattern above holds
 - [ ] The reviewer runs on a different model family from the authoring agent
+
+**Currently unmet, and it is the last one.** Every tier in `cost-model.properties` resolves
+to an Anthropic model, so reviewer and author share a family and the self-agreement
+mitigation is weakened. Either point `tier.review` at a non-Anthropic model through LiteLLM,
+or accept the weaker mitigation knowingly and lean harder on the auto-approval revert
+counter.
 
 **Currently unmet.** Every tier in `cost-model.properties` resolves to an Anthropic model,
 so reviewer and author share a family and the self-agreement mitigation is weakened. Either
@@ -453,6 +514,7 @@ Append a line whenever exit checks are run. Date, phase, what was run, outcome.
 | 2026-09-22 | 3 | `./scripts/verify.sh --all` | **PASS.** 36 fast + 4 integration. Store parity between Qdrant and the in-memory store confirmed. Manual retrieval quality pass still outstanding — needs the litellm embedder. |
 | 2026-09-22 | 0, 1 | built `scripts/baseline.py` and `CostWorksheet` | Instruments ready. Neither phase can close until the repo is named (Q1) and the unit costs are measured rather than guessed. |
 | 2026-09-22 | 4 | worker kill/restart against real Temporal + full epic run | **PASS.** Workflow survived the worker being killed, a signal was accepted with no worker alive, and the new worker resumed from the await line. Epic ran through to MERGED with 2 rework loops and no human in them. Found that actual-cost reconciliation is not wired — see the phase 4 note. |
+| 2026-09-22 | 6, 7, 9 | `./scripts/verify.sh --all` | **112 fast + 4 integration green.** PM, BA, architect, reviewer and QA agents written and tested against a scripted model. Every automated box in those phases is ticked; none of the phases are done, because judging output needs a key and a person. |
 | 2026-09-22 | 1 | `AgentCostModel` + `mvn test` | Unit costs now **derived** from Anthropic list prices x per-agent tokens, with tier→model mapping. Six-story epic: **$12.02**. 49 tests green. Token counts are still estimates — that is what remains before phase 1 closes. |
 
 ---
@@ -461,13 +523,18 @@ Append a line whenever exit checks are run. Date, phase, what was run, outcome.
 
 | Suite | Tests | Covers |
 | :-- | --: | :-- |
+| `PmAgentTest` | 12 | Prompt assembly, fence stripping, four unusable replies, token usage |
+| `BaAgentTest` | 14 | Testability classification, the unanswerable path, citations, the split |
+| `ArchitectAgentTest` | 13 | Tier and graph parsing, four deadlocking graphs, schedulability |
+| `ReviewerAgentTest` | 11 | Scope creep, self-contradiction, missing booleans and verdicts |
+| `QaAgentTest` | 15 | Routing order, completeness, never seeing the dev agent's tests |
 | `EstimateCalculatorTest` | 13 | The worked example, which stages loop, tier cost, designer only with a UI, human minutes, four rejections |
 | `MarkdownChunkerTest` | 6 | Section splitting, frontmatter, stable ids, folding short sections |
 | `RetrievalTest` | 8 | Search accuracy, attribution, re-indexing, the attempt cap, failure modes |
 | `EpicWorkflowTest` | 5 | Journey blocking and resume, abandonment, rejected gate, dependency layers |
 | `StoryWorkflowTest` | 4 | Auto-approve, the rework loop, the PM route, an unreviewed PR |
 | `QdrantVectorStoreIT` | 4 | Store parity, payload round trip, upsert replacing, idempotent setup |
-| **Fast suite** | **36** | No Docker, no API key, about 6 seconds |
+| **Fast suite** | **112** | No Docker, no API key, about 8 seconds |
 
 Mutation score on `EstimateCalculator`: **92%** against a 70% threshold.
 
