@@ -2,6 +2,7 @@ package com.loop.orchestrator.activity;
 
 import com.loop.orchestrator.agent.ArchitectAgent;
 import com.loop.orchestrator.agent.BaAgent;
+import com.loop.orchestrator.agent.ScriptedDevAgent;
 import com.loop.orchestrator.agent.PmAgent;
 import com.loop.orchestrator.agent.QaAgent;
 import com.loop.orchestrator.agent.ReviewerAgent;
@@ -112,7 +113,8 @@ class AgentActivitiesTest {
 
     private AgentBuildActivities build() {
         return new AgentBuildActivities(
-                new ReviewerAgent(model, 4096), new QaAgent(model, 4096));
+                new ReviewerAgent(model, 4096), new QaAgent(model, 4096),
+                new ScriptedDevAgent());
     }
 
     @Nested

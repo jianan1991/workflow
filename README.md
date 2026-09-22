@@ -39,15 +39,21 @@ Docker state lives in **named volumes**, never bind mounts. This repository sits
 OneDrive, and a file sync client touching a live database directory corrupts it slowly, in
 a way that looks like a bug in your own code.
 
-Five of six planning and checking agents are wired and run on every epic — PM, BA,
-architect, reviewer and QA. The dev agent is not: `implement` and `runCi` are honestly
-stubbed, and `runCi` reports coverage and mutation as *unmeasured* rather than returning a
-pass.
+All six agents are wired and run on every epic. Five are single model calls behind
+`ChatModel`; the dev agent is a multi-turn coding loop, so it sits behind its own `DevAgent`
+seam and dispatches to OpenHands headless.
 
-Not here yet, in build order: dispatch from Temporal into OpenHands, cost reconciliation
-from real token usage, the scip-java code index, and enforced CI gates.
+`runCi` is still a stub and reports coverage and mutation as *unmeasured* rather than
+returning a pass — faking the mutation gate would remove the one check an agent cannot talk
+its way past.
 
-**No agent has called a real model yet.** `llm.provider` defaults to `scripted`.
+Not here yet, in build order: the scip-java code index, gate 2 (the architect flags
+structural changes and the workflow ignores it), and enforced CI gates.
+
+**Nothing has called a real model or written a line of code yet.** `llm.provider` and
+`dev.provider` both default to `scripted`, deliberately: a pipeline that starts editing a
+repository because somebody ran it to see what it did is a worse failure than one that does
+nothing.
 
 ## Testing
 
@@ -57,7 +63,7 @@ from real token usage, the scip-java code index, and enforced CI gates.
 ./scripts/verify.sh --gates   # adds coverage and mutation. Phase 5 onward.
 ```
 
-The fast suite is 132 tests in about nine seconds with **no Docker and no API key**. That is
+The fast suite is 153 tests in about ten seconds with **no Docker and no API key**. That is
 deliberate: the moment `mvn test` needs a container, people stop running it. Integration
 tests are named `*IT.java` so surefire ignores them and failsafe picks them up.
 

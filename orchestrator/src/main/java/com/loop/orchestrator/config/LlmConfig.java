@@ -2,6 +2,9 @@ package com.loop.orchestrator.config;
 
 import com.loop.orchestrator.agent.ArchitectAgent;
 import com.loop.orchestrator.agent.BaAgent;
+import com.loop.orchestrator.agent.DevAgent;
+import com.loop.orchestrator.agent.OpenHandsDevAgent;
+import com.loop.orchestrator.agent.ScriptedDevAgent;
 import com.loop.orchestrator.agent.PmAgent;
 import com.loop.orchestrator.agent.QaAgent;
 import com.loop.orchestrator.agent.ReviewerAgent;
@@ -23,6 +26,7 @@ import java.io.Reader;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Properties;
@@ -282,6 +286,41 @@ public class LlmConfig {
                            KnowledgeIndexer knowledge,
                            @Value("${llm.max-output-tokens:4096}") int maxOutputTokens) {
         return new BaAgent(chatModel, knowledge, maxOutputTokens);
+    }
+
+    /**
+     * {@code scripted} writes no code. {@code openhands} dispatches to the real harness.
+     *
+     * <p>Scripted by default, for the same reason the scripted model is: a pipeline that
+     * starts editing a repository because somebody ran it to see what it did is a worse
+     * failure than one that does nothing.
+     */
+    @Bean
+    public DevAgent devAgent(
+            @Value("${dev.provider:scripted}") String provider,
+            @Value("${dev.executable:openhands}") String executable,
+            @Value("${dev.workspace:}") String workspace,
+            @Value("${dev.timeout-minutes:20}") int timeoutMinutes) {
+
+        if (!"openhands".equalsIgnoreCase(provider)) {
+            log.warn("dev.provider=scripted — NO CODE WILL BE WRITTEN. Everything downstream "
+                    + "still runs, so CI, review, QA and the gates stay exercised.");
+            return new ScriptedDevAgent();
+        }
+
+        if (workspace.isBlank()) {
+            throw new IllegalStateException("dev.provider=openhands needs dev.workspace — "
+                    + "without it the harness would start in whatever directory this process "
+                    + "happens to be in and edit the wrong repository");
+        }
+
+        // Must stay under the activity's start-to-close timeout, or Temporal gives up on a
+        // run that is still going and retries it on top of a half-edited workspace.
+        Duration timeout = Duration.ofMinutes(timeoutMinutes);
+        log.warn("dev.provider=openhands — the agent WILL edit {} and spend money. This "
+                + "dispatch has never been verified against a real run.", workspace);
+
+        return new OpenHandsDevAgent(executable, Path.of(workspace), timeout);
     }
 
     @Bean

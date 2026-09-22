@@ -56,7 +56,7 @@ boundaries rot between them.
 | 5 · CI gates | ◐ gate proven, CI wiring outstanding | 2026-09-22 |
 | 6 · PM agent | ◐ wired and running; needs a key to judge | 2026-09-22 |
 | 7 · Architect | ◐ wired and running; needs a key to judge | 2026-09-22 |
-| 8 · First dev agent | ☐ not started — the only agent still unwired | — |
+| 8 · First dev agent | ◐ dispatch written, never executed | 2026-09-22 |
 | 9 · Reviewer and QA | ◐ wired and running; needs a key to judge | 2026-09-22 |
 | 10 · Escalation and write-back | ☐ not started | — |
 | 11 · Auto-approval | ☐ not started | — |
@@ -126,6 +126,8 @@ real Temporal server, scripted model, no key:
 [estimate]  $10.67 and 99 human minutes
 gate 1      12 criteria automated, 4 need a person
             $10.67 estimated; actual accrues per activity as stories run
+[mid]       SCRIPTED dev agent: no code was written
+            $0.4236 per story — the dev agent dominates, as the estimate says it should
 ```
 
 **The dev agent is the one that is not wired.** `implement()` and `runCi()` are honestly
@@ -427,11 +429,29 @@ certainty — paying a model to guess at it is slower and wrong more often.
 
 **Exit checks**
 
-- [ ] The simplest tier-1 story, start to finish
+- [x] `DevAgent` seam written — the one agent that is not a single model call, so it sits
+      behind a harness rather than behind `ChatModel`
+- [x] `OpenHandsDevAgent` dispatches `openhands --headless --json -f task.txt`, with the
+      process working directory set to the checkout (the CLI documents no workspace flag)
+- [x] `ScriptedDevAgent` is the default and writes no code, so a pipeline nobody configured
+      cannot quietly start editing a repository
+- [x] The task names the specific previous failure, so attempt two is a correction rather
+      than a retry, and warns about the two things that bounce a PR: a test that asserts
+      nothing, and scope creep
+- [x] `dev.provider=openhands` with no `dev.workspace` **refuses to start** — verified
+- [x] 17 tests, including a missing workspace, a missing executable, and usage parsing that
+      reports zero rather than inventing a number
+- [ ] **Run against a real repository.** Blocked on Q1 (which repo) and a key
 - [ ] A PR opens and CI passes, including the mutation gate
 - [ ] A person would merge it without changes
 - [ ] Fewer than three attempts
 - [ ] Wall-clock per attempt recorded
+
+**Never executed.** The invocation comes from docs.openhands.dev on 2026-09-22 and has not
+been run once. The JSONL event schema is read defensively for that reason — fields that are
+not found report zero *and say so*, because a token count silently becoming zero is
+indistinguishable from a free run. `describe()` returns the word UNVERIFIED so a component
+nobody has executed does not look like one that works.
 
 **Stop if:** the tests it writes pass coverage while failing mutation. That means the agent
 has learned to game the number rather than write assertions, and it will keep doing it.
@@ -560,6 +580,7 @@ Append a line whenever exit checks are run. Date, phase, what was run, outcome.
 | 2026-09-22 | 0, 1 | built `scripts/baseline.py` and `CostWorksheet` | Instruments ready. Neither phase can close until the repo is named (Q1) and the unit costs are measured rather than guessed. |
 | 2026-09-22 | 4 | worker kill/restart against real Temporal + full epic run | **PASS.** Workflow survived the worker being killed, a signal was accepted with no worker alive, and the new worker resumed from the await line. Epic ran through to MERGED with 2 rework loops and no human in them. Found that actual-cost reconciliation is not wired — see the phase 4 note. |
 | 2026-09-22 | 6, 7, 9 | agents wired + end-to-end run | **132 fast + 4 integration green.** Agents now called by the pipeline, not merely beaned. Three bugs found by running the application rather than by tests: the Qdrant collection was never created, the PM script could not tell its two calls apart, and the scripted QA reported passes when nothing had run. |
+| 2026-09-22 | 8 | dev agent dispatch + end-to-end run | **153 fast + 4 integration green.** OpenHands dispatch written behind a `DevAgent` seam, scripted by default. Verified that `dev.provider=openhands` with no workspace refuses to start. Story cost went from $0.0036 to $0.4236 once the dev agent contributed — the shape the estimate predicts. The dispatch itself has never run. |
 | 2026-09-22 | 4 | cost reconciliation + end-to-end run | **140 fast + 4 integration green.** Spend now comes from real token usage, summed across dev, reviewer and QA. A run reported $0.0036 per story where it had reported $0.0000 — the tracking was working and `round2` was rounding sub-cent spend away, which reads exactly like cost tracking that was never wired. |
 | 2026-09-22 | 9 | BA criteria threaded through | The reviewer and QA were judging against criteria invented from the story title. Now per story, carried on the child workflow. Gate 1 reports the real testability split: 12 automated, 4 needing a person. |
 | 2026-09-22 | 6, 7, 9 | `./scripts/verify.sh --all` | **112 fast + 4 integration green.** PM, BA, architect, reviewer and QA agents written and tested against a scripted model. Every automated box in those phases is ticked; none of the phases are done, because judging output needs a key and a person. |
@@ -579,13 +600,14 @@ Append a line whenever exit checks are run. Date, phase, what was run, outcome.
 | `AgentActivitiesTest` | 8 | That the agents are actually reached — asserts on the model being called, not only on values returned |
 | `ReviewerIndependenceTest` | 12 | Family attribution, uncertainty resolving toward warning |
 | `CostingChatModelTest` | 6 | Pricing per tier, scripted runs priced, unpriced agents not silent |
+| `DevAgentTest` | 13 | Task assembly, the previous-failure correction, workspace and executable guards, usage parsing |
 | `EstimateCalculatorTest` | 13 | The worked example, which stages loop, tier cost, designer only with a UI, human minutes, four rejections |
 | `MarkdownChunkerTest` | 6 | Section splitting, frontmatter, stable ids, folding short sections |
 | `RetrievalTest` | 8 | Search accuracy, attribution, re-indexing, the attempt cap, failure modes |
 | `EpicWorkflowTest` | 5 | Journey blocking and resume, abandonment, rejected gate, dependency layers |
 | `StoryWorkflowTest` | 4 | Auto-approve, the rework loop, the PM route, an unreviewed PR |
 | `QdrantVectorStoreIT` | 4 | Store parity, payload round trip, upsert replacing, idempotent setup |
-| **Fast suite** | **140** | No Docker, no API key, about 9 seconds |
+| **Fast suite** | **153** | No Docker, no API key, about 10 seconds |
 
 Mutation score on `EstimateCalculator`: **92%** against a 70% threshold.
 
@@ -597,7 +619,8 @@ the four that decide whether any of this was worth doing.
 | Gap | Where it is recorded |
 | :-- | :-- |
 | No agent has ever called a real model | every phase from 6 on stays ◐ |
-| The dev agent is not wired; `implement` and `runCi` are stubs | phase 8, and said plainly in `AgentBuildActivities` |
+| The dev agent dispatch has never been executed against a real repository | phase 8; `describe()` says UNVERIFIED |
+| `runCi` is still a stub — coverage and mutation are unmeasured | phase 5, and said plainly in `AgentBuildActivities` |
 | The reviewer shares a model family with the author | phase 9, warned at startup |
 | The architect guesses the dependency graph; no code index | phase 7 |
 | Gate 2 never fires — the architect flags structural changes and the workflow ignores it | logged as a warning on every structural epic |

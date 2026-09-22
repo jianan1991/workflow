@@ -1,5 +1,6 @@
 package com.loop.orchestrator.activity;
 
+import com.loop.orchestrator.agent.DevAgent;
 import com.loop.orchestrator.agent.QaAgent;
 import com.loop.orchestrator.agent.ReviewerAgent;
 import com.loop.orchestrator.domain.Domain.AcceptanceCriterion;
@@ -39,22 +40,36 @@ public class AgentBuildActivities implements BuildActivities {
 
     private final ReviewerAgent reviewer;
     private final QaAgent qa;
+    private final DevAgent dev;
 
-    public AgentBuildActivities(ReviewerAgent reviewer, QaAgent qa) {
+    public AgentBuildActivities(ReviewerAgent reviewer, QaAgent qa, DevAgent dev) {
         this.reviewer = reviewer;
         this.qa = qa;
+        this.dev = dev;
     }
 
     @Override
     public ImplementResult implement(Story story, Agent agent, int attempt,
                                      String previousFailure) {
-        // NOT WIRED. Needs the OpenHands dispatch and a sandbox to run in. Zero cost is
-        // accurate here precisely because nothing ran — it will stop being accurate the
-        // moment the dispatch lands, and the dev agent is the largest line on the bill.
-        log.warn("[{}] {} attempt {} — dev agent is not wired; no code was written, $0 spent",
-                agent.name().toLowerCase(), story.id(), attempt);
-        return new ImplementResult(
-                "branch feat/" + story.id().toLowerCase() + " (no dispatch yet)", 0.0);
+        // Criteria are not on this signature yet — the workflow passes them to review and
+        // QA but not here. Until they are, the dev agent is told what to build by title
+        // alone, which is thin. Threading them through is the next thing.
+        DevAgent.Result result = dev.implement(story, List.of(), agent, attempt, previousFailure);
+
+        if (!result.succeeded()) {
+            // A harness failure is not a code defect. Letting it through as a successful
+            // implementation would send an empty change to CI and blame the reviewer for
+            // not liking it.
+            throw new IllegalStateException(("dev agent failed on %s attempt %d: %s")
+                    .formatted(story.id(), attempt, result.failure()));
+        }
+
+        return new ImplementResult(result.branch(), result.costUsd());
+    }
+
+    /** Which dev agent is in play, for the startup log and the command centre. */
+    public String devAgentDescription() {
+        return dev.describe();
     }
 
     @Override

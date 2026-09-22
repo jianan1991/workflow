@@ -30,6 +30,24 @@ cost:
   # but unpriced, or priced but uncallable.
   model-file: ${COST_MODEL_FILE:../cost-model.properties}
 
+dev:
+  # The dev agent is the only one that is not a single model call - it is a multi-turn
+  # coding loop, so it sits behind a harness rather than behind ChatModel.
+  #
+  # scripted  = writes no code. Everything downstream still runs.
+  # openhands = dispatches to OpenHands headless. It WILL edit the workspace.
+  provider: ${DEV_PROVIDER:scripted}
+
+  executable: ${DEV_EXECUTABLE:openhands}
+
+  # The checkout the agent works in. Required when provider is openhands - without it the
+  # harness starts in whatever directory this process happens to be in.
+  workspace: ${DEV_WORKSPACE:}
+
+  # Must stay below the 30 minute activity timeout in StoryWorkflowImpl, or Temporal gives
+  # up on a run that is still going and retries it on a half-edited workspace.
+  timeout-minutes: ${DEV_TIMEOUT_MINUTES:20}
+
 qdrant:
   url: ${QDRANT_URL:http://localhost:6333}
   collection: knowledge
