@@ -54,10 +54,10 @@ boundaries rot between them.
 | 3 · Retrieval | ◐ automated + integration green, manual pass outstanding | 2026-09-22 |
 | 4 · Orchestration, stub agents | ☑ **done** | 2026-09-22 |
 | 5 · CI gates | ◐ gate proven, CI wiring outstanding | 2026-09-22 |
-| 6 · PM agent | ◐ written and tested scripted; needs a key to judge | 2026-09-22 |
-| 7 · Architect | ◐ written and tested scripted; needs a key to judge | 2026-09-22 |
-| 8 · First dev agent | ☐ not started | — |
-| 9 · Reviewer and QA | ◐ written and tested scripted; needs a key to judge | 2026-09-22 |
+| 6 · PM agent | ◐ wired and running; needs a key to judge | 2026-09-22 |
+| 7 · Architect | ◐ wired and running; needs a key to judge | 2026-09-22 |
+| 8 · First dev agent | ☐ not started — the only agent still unwired | — |
+| 9 · Reviewer and QA | ◐ wired and running; needs a key to judge | 2026-09-22 |
 | 10 · Escalation and write-back | ☐ not started | — |
 | 11 · Auto-approval | ☐ not started | — |
 | 12 · Blast radius | ☐ not started | — |
@@ -110,6 +110,34 @@ A green suite here and a working agent are unrelated claims.
 
 This is why phases 6 to 9 stay ◐ with every automated box ticked. Writing the agent is not
 the phase; judging its output is, and that needs a key and a person.
+
+### What the pipeline does today
+
+Five of six planning and checking agents are wired and run on every epic. Verified against a
+real Temporal server, scripted model, no key:
+
+```
+[pm]        maps the journey, finds a gap, blocks
+[pm]        raises a question — 3 of 3 searches used, nothing found
+            (a person answers)
+[pm]        re-maps: 0 gaps
+[architect] decomposes into 4 stories, flags structural
+[ba]        writes criteria per story — 4 each, 3 automated
+[estimate]  $10.67 and 99 human minutes
+gate 1      12 criteria automated, 4 need a person
+```
+
+**The dev agent is the one that is not wired.** `implement()` and `runCi()` are honestly
+stubbed: neither is a model call, one needs a coding harness with a sandbox and the other
+needs the build to actually run. `runCi` reports coverage and mutation as *unmeasured*
+rather than returning a pass — faking the mutation gate would remove the only check an agent
+cannot talk its way past.
+
+**Two invariants worth not losing.** A story with no acceptance criteria is blocked rather
+than built, because building it would pass review against nothing and reach a person looking
+finished. And QA with no observations returns UNVERIFIABLE for everything rather than
+inferring outcomes from the criteria — which is what stops a pipeline that executes nothing
+from reporting green.
 
 ---
 
@@ -334,6 +362,10 @@ line and checking what it does.
       reply can be unusable
 - [x] An unreadable `coverage` is rejected, never defaulted to KNOWN - defaulting would
       release an epic to the architect with an open question inside it
+- [x] **Wired into the pipeline** — `AgentPlanningActivities` calls it, verified running
+- [x] `raiseQuestion` searches before interrupting anyone: the agent proposes phrasings,
+      they go through the retrieval attempt cap, and the queries that failed are recorded
+      on the question
 - [ ] **Run against real epics with a real model** (`llm.provider=litellm`)
 - [ ] Its gap questions include ones a person would genuinely have asked and nobody did
 - [ ] No question asks about something plainly stated in the epic
@@ -366,6 +398,7 @@ you are grading an exam you have not marked.
 - [x] One test runs the architect's real output through `EpicWorkflowImpl.dependencyLayers`
       to prove what it produces is schedulable
 - [x] An out-of-range or missing tier is rejected, never defaulted to 1
+- [x] **Wired into the pipeline** — decomposition runs through it on every epic
 - [ ] Decompose real epics with a real model; compare against what you would have built
 - [ ] Tier assignments match a person's judgement on at least 70% of stories
 - [ ] The graph is derived from a code index, not from the model's reading of the epic
@@ -423,6 +456,10 @@ compounds through every later phase.
       rebuilding against a requirement nobody wanted changes nothing
 - [x] A reviewer reply that contradicts itself is rejected. Claiming the criteria are met
       while listing unmet ones would otherwise merge on the optimistic half
+- [x] **Wired into the pipeline**, and judging against **real BA criteria** rather than
+      placeholders invented from the story title
+- [x] A same-family reviewer is warned about at startup and served from
+      `/policy/reviewer-independence` — 409 when not independent
 - [ ] Inject the four known defects with a real model; confirm the pattern above holds
 - [ ] The reviewer runs on a different model family from the authoring agent
 
@@ -514,6 +551,8 @@ Append a line whenever exit checks are run. Date, phase, what was run, outcome.
 | 2026-09-22 | 3 | `./scripts/verify.sh --all` | **PASS.** 36 fast + 4 integration. Store parity between Qdrant and the in-memory store confirmed. Manual retrieval quality pass still outstanding — needs the litellm embedder. |
 | 2026-09-22 | 0, 1 | built `scripts/baseline.py` and `CostWorksheet` | Instruments ready. Neither phase can close until the repo is named (Q1) and the unit costs are measured rather than guessed. |
 | 2026-09-22 | 4 | worker kill/restart against real Temporal + full epic run | **PASS.** Workflow survived the worker being killed, a signal was accepted with no worker alive, and the new worker resumed from the await line. Epic ran through to MERGED with 2 rework loops and no human in them. Found that actual-cost reconciliation is not wired — see the phase 4 note. |
+| 2026-09-22 | 6, 7, 9 | agents wired + end-to-end run | **132 fast + 4 integration green.** Agents now called by the pipeline, not merely beaned. Three bugs found by running the application rather than by tests: the Qdrant collection was never created, the PM script could not tell its two calls apart, and the scripted QA reported passes when nothing had run. |
+| 2026-09-22 | 9 | BA criteria threaded through | The reviewer and QA were judging against criteria invented from the story title. Now per story, carried on the child workflow. Gate 1 reports the real testability split: 12 automated, 4 needing a person. |
 | 2026-09-22 | 6, 7, 9 | `./scripts/verify.sh --all` | **112 fast + 4 integration green.** PM, BA, architect, reviewer and QA agents written and tested against a scripted model. Every automated box in those phases is ticked; none of the phases are done, because judging output needs a key and a person. |
 | 2026-09-22 | 1 | `AgentCostModel` + `mvn test` | Unit costs now **derived** from Anthropic list prices x per-agent tokens, with tier→model mapping. Six-story epic: **$12.02**. 49 tests green. Token counts are still estimates — that is what remains before phase 1 closes. |
 
@@ -528,15 +567,36 @@ Append a line whenever exit checks are run. Date, phase, what was run, outcome.
 | `ArchitectAgentTest` | 13 | Tier and graph parsing, four deadlocking graphs, schedulability |
 | `ReviewerAgentTest` | 11 | Scope creep, self-contradiction, missing booleans and verdicts |
 | `QaAgentTest` | 15 | Routing order, completeness, never seeing the dev agent's tests |
+| `AgentActivitiesTest` | 8 | That the agents are actually reached — asserts on the model being called, not only on values returned |
+| `ReviewerIndependenceTest` | 12 | Family attribution, uncertainty resolving toward warning |
 | `EstimateCalculatorTest` | 13 | The worked example, which stages loop, tier cost, designer only with a UI, human minutes, four rejections |
 | `MarkdownChunkerTest` | 6 | Section splitting, frontmatter, stable ids, folding short sections |
 | `RetrievalTest` | 8 | Search accuracy, attribution, re-indexing, the attempt cap, failure modes |
 | `EpicWorkflowTest` | 5 | Journey blocking and resume, abandonment, rejected gate, dependency layers |
 | `StoryWorkflowTest` | 4 | Auto-approve, the rework loop, the PM route, an unreviewed PR |
 | `QdrantVectorStoreIT` | 4 | Store parity, payload round trip, upsert replacing, idempotent setup |
-| **Fast suite** | **112** | No Docker, no API key, about 8 seconds |
+| **Fast suite** | **132** | No Docker, no API key, about 9 seconds |
 
 Mutation score on `EstimateCalculator`: **92%** against a 70% threshold.
 
 Phases 0, 1, 5 and 12 have no code and are the ones most likely to be skipped. They are also
 the four that decide whether any of this was worth doing.
+
+### Known gaps, none of them hidden
+
+| Gap | Where it is recorded |
+| :-- | :-- |
+| No agent has ever called a real model | every phase from 6 on stays ◐ |
+| The dev agent is not wired; `implement` and `runCi` are stubs | phase 8, and said plainly in `AgentBuildActivities` |
+| Story cost is not reconciled — `costUsd` is not fed by real token usage | phase 4 note |
+| The reviewer shares a model family with the author | phase 9, warned at startup |
+| The architect guesses the dependency graph; no code index | phase 7 |
+| Gate 2 never fires — the architect flags structural changes and the workflow ignores it | logged as a warning on every structural epic |
+| No CI pipeline, so the gates are not enforced anywhere | phase 5 |
+| No deploy or rollback story | phase 12, still the largest undesigned gap |
+| The review-hours tally has not started | phase 0's stop condition, and it expires once agents run |
+
+**Three bugs in two sessions were found by running the application, not by the suite** — a
+tier name where a model id belonged, a missing Qdrant collection, and a scripted QA that
+reported passes on a run that never happened. Every one had green tests. Treat a green suite
+as necessary and nowhere near sufficient.

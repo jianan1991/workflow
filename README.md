@@ -39,8 +39,15 @@ Docker state lives in **named volumes**, never bind mounts. This repository sits
 OneDrive, and a file sync client touching a live database directory corrupts it slowly, in
 a way that looks like a bug in your own code.
 
-Not here yet, in build order: the scip-java code index, dispatch from Temporal into
-OpenHands, the six planning agents against the real API, and enforced CI gates.
+Five of six planning and checking agents are wired and run on every epic — PM, BA,
+architect, reviewer and QA. The dev agent is not: `implement` and `runCi` are honestly
+stubbed, and `runCi` reports coverage and mutation as *unmeasured* rather than returning a
+pass.
+
+Not here yet, in build order: dispatch from Temporal into OpenHands, cost reconciliation
+from real token usage, the scip-java code index, and enforced CI gates.
+
+**No agent has called a real model yet.** `llm.provider` defaults to `scripted`.
 
 ## Testing
 
@@ -50,7 +57,7 @@ OpenHands, the six planning agents against the real API, and enforced CI gates.
 ./scripts/verify.sh --gates   # adds coverage and mutation. Phase 5 onward.
 ```
 
-The fast suite is 53 tests in about six seconds with **no Docker and no API key**. That is
+The fast suite is 132 tests in about nine seconds with **no Docker and no API key**. That is
 deliberate: the moment `mvn test` needs a container, people stop running it. Integration
 tests are named `*IT.java` so surefire ignores them and failsafe picks them up.
 
