@@ -10,6 +10,7 @@ import com.loop.orchestrator.knowledge.KnowledgeIndexer;
 import com.loop.orchestrator.llm.ChatModel;
 import com.loop.orchestrator.llm.LiteLlmChatModel;
 import com.loop.orchestrator.llm.ScriptedChatModel;
+import com.loop.orchestrator.policy.ReviewerIndependence;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -160,6 +161,25 @@ public class LlmConfig {
     }
 
     /**
+     * Every agent's actual model id, with tiers resolved. Shares {@code AgentCostModel}'s
+     * resolution so the model this warns about is the same one that gets priced and the
+     * same one that gets called.
+     */
+    static Map<String, String> resolvedModels(String costModelFile) {
+        Properties properties = new Properties();
+        try (Reader reader = Files.newBufferedReader(Path.of(costModelFile))) {
+            properties.load(reader);
+        } catch (IOException e) {
+            throw new UncheckedIOException("could not read the cost model at " + costModelFile, e);
+        }
+
+        Map<String, String> models = new LinkedHashMap<>();
+        new AgentCostModel(properties).derivations()
+                .forEach(derivation -> models.put(derivation.agent(), derivation.model()));
+        return models;
+    }
+
+    /**
      * Reads the agent-to-tier mapping from the same file that prices them, so an agent can
      * never be callable but unpriced, or priced but uncallable.
      */
@@ -179,6 +199,33 @@ public class LlmConfig {
             tiers.put(agent, direct != null && !direct.isBlank() ? direct.trim() : tier);
         }
         return tiers;
+    }
+
+    /**
+     * Checked once at startup and served from {@code /policy/reviewer-independence}, so a
+     * person approving a plan sees it rather than having to remember a log line.
+     *
+     * <p>Warned about, not enforced. Refusing to start would be the wrong trade: a weakened
+     * reviewer still catches plenty, and a stack that will not boot over a configuration
+     * preference gets worked around within a day.
+     */
+    @Bean
+    public ReviewerIndependence.Assessment reviewerIndependence(
+            @Value("${cost.model-file:../cost-model.properties}") String costModelFile) {
+
+        // Resolved models, not tier names. agentTiers() answers "which tier", and a tier
+        // name like `review` attributes to no vendor at all - which would fire this warning
+        // for the wrong reason and tell nobody anything useful.
+        ReviewerIndependence.Assessment assessment =
+                ReviewerIndependence.assess(resolvedModels(costModelFile));
+
+        if (assessment.independent()) {
+            log.info("reviewer independence: {} — {}",
+                    assessment.reviewerModel(), assessment.finding());
+        } else {
+            log.warn(assessment.warningBanner());
+        }
+        return assessment;
     }
 
     @Bean
