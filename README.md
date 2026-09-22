@@ -52,7 +52,7 @@ from real token usage, the scip-java code index, and enforced CI gates.
 ## Testing
 
 ```bash
-./scripts/verify.sh           # fast suite: unit + workflow. ~6s
+./scripts/verify.sh           # fast suite: unit + workflow. ~9s
 ./scripts/verify.sh --all     # adds integration tests. Needs Docker.
 ./scripts/verify.sh --gates   # adds coverage and mutation. Phase 5 onward.
 ```
@@ -135,8 +135,9 @@ curl -X POST http://localhost:8081/epics \
 curl http://localhost:8081/epics/LOOP-14
 ```
 
-The stub PM agent will report a journey gap and the workflow will block. Watch it sleep in the
-Temporal UI — that is the behaviour the whole design rests on. Release it:
+The PM agent maps the journey, finds a gap, and raises a question — recording the searches
+it ran against the knowledge base first. The workflow then blocks. Watch it sleep in the
+Temporal UI; that is the behaviour the whole design rests on. Release it:
 
 ```bash
 curl -X POST http://localhost:8081/epics/LOOP-14/answer \
@@ -179,14 +180,28 @@ only in LiteLLM, so the agent never holds it.
 
 Nothing dispatches to it from Temporal yet — that is the next piece of work.
 
-### What the stub run demonstrates
+### What a run demonstrates
 
-Watch the log, not just the result. A tier 2 story fails its mutation gate, gets rebuilt,
-fails QA with an empty 429 body, gets rebuilt again, and passes — **and no person was
-involved in any of that**. Those are the rework loops, and they are the only reason this
-pipeline is worth having.
+Watch the log, not just the result:
 
-The three QA routes are all exercised:
+```
+[pm]        maps the journey, finds a gap, blocks
+[pm]        3 of 3 searches used, nothing found
+[architect] decomposes, flags structural
+[ba]        writes criteria per story
+gate 1      12 criteria automated, 4 need a person
+```
+
+**Nothing implements the stories yet.** The dev agent is unwired, so QA has no observations
+and returns UNVERIFIABLE rather than reporting green — which is the behaviour that keeps an
+unfinished pipeline from looking finished.
+
+To see the rework loop itself, run `StoryWorkflowTest`: it uses `StubBuildActivities`, whose
+failure pattern is deliberate. A tier 2 story fails its mutation gate, gets rebuilt, fails QA
+with an empty 429 body, gets rebuilt again, and passes — **and no person is involved in any
+of it**. Those loops are the only reason this pipeline is worth having.
+
+The three QA routes are all exercised there:
 
 | Outcome | Goes to | Why |
 | :-- | :-- | :-- |
@@ -196,6 +211,9 @@ The three QA routes are all exercised:
 
 To see the route back to the PM, prefix a story title with `[criteria-gap]` — the stub QA
 agent then reports that the code met the criteria and the criteria were wrong.
+
+A story with **no** acceptance criteria is blocked rather than built. Building it would pass
+review against nothing and reach a person looking finished.
 
 ---
 
