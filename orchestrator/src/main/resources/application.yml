@@ -11,12 +11,24 @@ temporal:
   target: ${TEMPORAL_TARGET:127.0.0.1:7233}
   namespace: ${TEMPORAL_NAMESPACE:default}
 
-# Not read yet — the real agents will use these. The orchestrator talks to LiteLLM
-# rather than to a provider, so model tiers stay in litellm/config.yaml and swapping
-# the cheap tier for a local model never touches workflow code.
 llm:
+  # scripted = no key, no network, no cost. Runs the whole pipeline end to end and proves
+  #            the plumbing: prompt assembly, parsing, error paths, cost accounting.
+  #            It proves NOTHING about whether an agent's answers are any good.
+  # litellm  = real model calls, real money.
+  #
+  # Scripted is the default deliberately. Defaulting to the real provider means a test run
+  # either fails to start or quietly spends money.
+  provider: ${LLM_PROVIDER:scripted}
+
   base-url: ${LITELLM_BASE_URL:http://localhost:4000}
   api-key: ${LITELLM_MASTER_KEY:sk-loop-local-dev}
+  max-output-tokens: 4096
+
+cost:
+  # One file prices the agents and maps them to tiers, so an agent can never be callable
+  # but unpriced, or priced but uncallable.
+  model-file: ${COST_MODEL_FILE:../cost-model.properties}
 
 qdrant:
   url: ${QDRANT_URL:http://localhost:6333}
