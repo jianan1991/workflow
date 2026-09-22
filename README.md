@@ -24,6 +24,8 @@ status in one place, knowledge in another.
 ```
 PHASES.md              The build plan and its exit checks. Tick them as you go.
 docker-compose.yml     Qdrant, Temporal (+ Postgres), Temporal UI, LiteLLM
+docker-compose.openhands.yml   The dev agent. Separate file - it mounts the Docker socket.
+openhands/             Dev agent config. Points at the proxy, never at Anthropic directly.
 litellm/config.yaml    Model tiering — strong / mid / cheap, one place to change it
 cost-model.properties  Unit costs and the rework multiplier. Phase 1 replaces the guesses.
 knowledge-base/        Plain markdown, dated and attributed. Indexed into Qdrant.
@@ -37,8 +39,8 @@ Docker state lives in **named volumes**, never bind mounts. This repository sits
 OneDrive, and a file sync client touching a live database directory corrupts it slowly, in
 a way that looks like a bug in your own code.
 
-Not here yet, in build order: the scip-java code index, OpenHands dispatch, and enforced
-CI gates.
+Not here yet, in build order: the scip-java code index, dispatch from Temporal into
+OpenHands, the six planning agents against the real API, and enforced CI gates.
 
 ## Testing
 
@@ -48,7 +50,7 @@ CI gates.
 ./scripts/verify.sh --gates   # adds coverage and mutation. Phase 5 onward.
 ```
 
-The fast suite is 23 tests in about six seconds with **no Docker and no API key**. That is
+The fast suite is 53 tests in about six seconds with **no Docker and no API key**. That is
 deliberate: the moment `mvn test` needs a container, people stop running it. Integration
 tests are named `*IT.java` so surefire ignores them and failsafe picks them up.
 
@@ -154,6 +156,22 @@ curl -X POST http://localhost:8081/epics/LOOP-14/stories/LOOP-14-3/approve \
 Kill the worker while anything is blocked and start it again. Every workflow resumes where
 it was. If that does not work, nothing built on top of it will either.
 
+### Starting the dev agent
+
+The dev agent lives in its own compose file, because it mounts the host Docker socket to
+spawn the sandbox where it runs builds and tests — effectively root on this machine.
+
+```bash
+cp openhands/config.toml.example openhands/config.toml
+docker compose -f docker-compose.openhands.yml up -d
+```
+
+It reaches Claude through the LiteLLM proxy, never directly: the model in `config.toml` is
+`litellm_proxy/cheap`, which the proxy resolves to a real model. The Anthropic key lives
+only in LiteLLM, so the agent never holds it.
+
+Nothing dispatches to it from Temporal yet — that is the next piece of work.
+
 ### What the stub run demonstrates
 
 Watch the log, not just the result. A tier 2 story fails its mutation gate, gets rebuilt,
@@ -178,7 +196,9 @@ agent then reports that the code met the criteria and the criteria were wrong.
 
 Do not stand everything up at once. From the Build Tracker, in order:
 
-1. Measure the baseline — two weeks of cycle time, review hours, PRs per engineer.
+1. Start the review-hours tally. This is greenfield, so there is no history to measure
+   against — the trend is the only evidence there will ever be, and it needs a first data
+   point taken before the agents start.
 2. Price one epic by hand at current model rates.
 3. Qdrant, then prove retrieval quality by hand before any agent touches it:
 

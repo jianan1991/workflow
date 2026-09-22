@@ -1,0 +1,36 @@
+# OpenHands LLM configuration.
+#
+# Copy to openhands/config.toml and fill in the key. That file is gitignored — this one
+# is the committed template and must never carry a real credential.
+#
+# Verified against docs.openhands.dev, 2026-09-22. OpenHands moved domain and registry
+# (all-hands.dev -> openhands.dev), so anything you find in an older write-up is suspect.
+
+[llm]
+
+# The `litellm_proxy/` prefix is what routes through the gateway rather than straight to a
+# provider. What follows is the model_name from litellm/config.yaml, NOT an Anthropic model
+# id — the proxy resolves the tier to a real model.
+#
+# Dev agents are the only OpenHands users. Tier 1 stories run on `cheap`, tier 2 on
+# `strong`; run two OpenHands instances with different configs, or flip this per dispatch.
+model = "litellm_proxy/cheap"
+
+# The proxy, reached from inside the OpenHands container. The documented run command adds
+# `--add-host host.docker.internal:host-gateway`, which is what makes this resolve.
+base_url = "http://host.docker.internal:4000"
+
+# LITELLM_MASTER_KEY from .env — the proxy's key, not an Anthropic key. The real Anthropic
+# credential lives only in LiteLLM, so OpenHands never holds it.
+api_key = "sk-loop-local-dev"
+
+# Claude supports prompt caching and the dev agent loop resends a near-identical prefix on
+# every turn, which is where most of its input tokens go. Leave this on.
+caching_prompt = true
+
+# Defaults are 4 / 5s / 30s / 2. A coding loop that retries hard against a rate limit
+# burns budget without making progress; fail sooner and let Temporal's own retry policy
+# decide, since that one is visible in the workflow history.
+num_retries = 2
+retry_min_wait = 5
+retry_max_wait = 30

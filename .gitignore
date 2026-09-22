@@ -1,4 +1,7 @@
 .env
+
+# Holds the proxy key. openhands/config.toml.example is the committed template.
+openhands/config.toml
 target/
 build/
 *.log

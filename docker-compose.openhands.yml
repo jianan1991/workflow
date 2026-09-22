@@ -1,0 +1,45 @@
+# The dev agent, kept in its own compose file on purpose.
+#
+# OpenHands mounts the host Docker socket so it can spawn the sandbox where it runs builds
+# and tests. That is effectively root on this machine. Putting it in the main compose file
+# would leave that socket one `docker compose up` away from every other service, and the
+# first person to run the stack would grant it without noticing.
+#
+#   docker compose -f docker-compose.openhands.yml up -d
+#
+# Before this goes anywhere near a real repository, settle:
+#   - rootless Docker or Sysbox for this container (risk 14)
+#   - what a ticket can talk the agent into doing, since ticket text reaches the prompt
+#     and the agent holds repository credentials (risk 7)
+#
+# Versions verified against docs.openhands.dev on 2026-09-22. The project moved domain and
+# registry from all-hands.dev, and the sandbox image variable was renamed — check both
+# before bumping.
+
+name: loop-agent
+
+services:
+
+  openhands:
+    image: docker.openhands.dev/openhands/openhands:1.8
+    restart: unless-stopped
+    environment:
+      # Replaces the older SANDBOX_RUNTIME_CONTAINER_IMAGE. Repository and tag are now
+      # separate variables.
+      AGENT_SERVER_IMAGE_REPOSITORY: ghcr.io/openhands/agent-server
+      AGENT_SERVER_IMAGE_TAG: 1.26.0-python
+      LOG_ALL_EVENTS: "true"
+    volumes:
+      # The sharp edge. See the note at the top of this file.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - openhands-state:/.openhands
+      # Model, proxy address and proxy key. Copy config.toml.example first.
+      - ./openhands/config.toml:/.openhands/config.toml:ro
+    ports:
+      - "3000:3000"
+    extra_hosts:
+      # What makes host.docker.internal:4000 in config.toml reach the LiteLLM proxy.
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  openhands-state:
