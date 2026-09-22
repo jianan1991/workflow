@@ -1,0 +1,45 @@
+# Model tiering lives here, not scattered through the orchestrator.
+#
+# Agents ask for "strong", "mid", "cheap" or "review" and never name a provider
+# model. Swapping the cheap tier for a local model later touches this file only.
+#
+# The reviewer deliberately resolves to a DIFFERENT family from the authoring
+# agents. A model tends to bless work from its own family, and the reviewer is
+# the structurally weakest component in the pipeline.
+
+model_list:
+
+  - model_name: strong
+    litellm_params:
+      model: os.environ/STRONG_MODEL
+      api_key: os.environ/LLM_API_KEY
+
+  - model_name: mid
+    litellm_params:
+      model: os.environ/MID_MODEL
+      api_key: os.environ/LLM_API_KEY
+
+  - model_name: cheap
+    litellm_params:
+      model: os.environ/CHEAP_MODEL
+      api_key: os.environ/LLM_API_KEY
+
+  - model_name: review
+    litellm_params:
+      model: os.environ/REVIEW_MODEL
+      api_key: os.environ/LLM_API_KEY
+
+litellm_settings:
+  drop_params: true
+  # Every call is tagged with the agent that made it, so per-epic cost can be
+  # attributed rather than estimated.
+  success_callback: []
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+
+router_settings:
+  routing_strategy: simple-shuffle
+  num_retries: 2
+  allowed_fails: 3
+  cooldown_time: 30

@@ -1,0 +1,50 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: loop-orchestrator
+  jackson:
+    default-property-inclusion: non_null
+
+temporal:
+  target: ${TEMPORAL_TARGET:127.0.0.1:7233}
+  namespace: ${TEMPORAL_NAMESPACE:default}
+
+# Not read yet — the real agents will use these. The orchestrator talks to LiteLLM
+# rather than to a provider, so model tiers stay in litellm/config.yaml and swapping
+# the cheap tier for a local model never touches workflow code.
+llm:
+  base-url: ${LITELLM_BASE_URL:http://localhost:4000}
+  api-key: ${LITELLM_MASTER_KEY:sk-loop-local-dev}
+
+qdrant:
+  url: ${QDRANT_URL:http://localhost:6333}
+  collection: knowledge
+
+knowledge:
+  path: ${KNOWLEDGE_PATH:../knowledge-base}
+
+  # hashing = offline, no key, lexical only. Proves the plumbing.
+  # litellm  = real embeddings. Required before judging retrieval quality.
+  embedder: ${KNOWLEDGE_EMBEDDER:hashing}
+  embedding-model: ${EMBEDDING_MODEL:text-embedding-3-small}
+
+  # Must match the embedder. Changing it means dropping the collection and reindexing —
+  # Qdrant refuses a mismatch, which is the least confusing way for this to fail.
+  dimensions: ${KNOWLEDGE_DIMENSIONS:256}
+
+  # qdrant = the real store. memory = nothing survives a restart, useful for a smoke run.
+  store: ${KNOWLEDGE_STORE:qdrant}
+
+  # Below this cosine score a hit is noise and the agent must ask a person instead.
+  # Re-measure it on your own notes; the right value is a property of your corpus.
+  relevance-floor: 0.25
+
+  # Reformulations an agent may try before it has to raise a question.
+  max-search-attempts: 3
+
+logging:
+  level:
+    com.loop.orchestrator: DEBUG
+    io.temporal: INFO

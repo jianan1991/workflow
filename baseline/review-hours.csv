@@ -1,0 +1,18 @@
+date,engineer,minutes,what,notes
+# ---------------------------------------------------------------------------------------
+# The number no API can give you. Tally it for two weeks, one line per sitting.
+#
+# Count: reading a diff, running someone else's branch, writing review comments, the
+# back-and-forth after changes are requested, and pairing on a review.
+#
+# Do not count: writing your own code, meetings, or waiting for CI.
+#
+# Round to 5 minutes. Precision is not the point — the order of magnitude is. Three people
+# at 3 hours a week is a very different project from three people at 12.
+#
+# Fill this in as you go, not on Friday from memory. Recalled review time is reliably
+# under-reported, and this is the number the whole business case rests on.
+#
+# Delete these comment lines before loading it into anything.
+# ---------------------------------------------------------------------------------------
+2026-09-22,,,,example row — delete me

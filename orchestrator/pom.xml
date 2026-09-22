@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.3.5</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>com.loop</groupId>
+  <artifactId>orchestrator</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <name>loop-orchestrator</name>
+  <description>Temporal workflows and activities for the AI agent delivery pipeline</description>
+
+  <properties>
+    <java.version>21</java.version>
+    <temporal.version>1.25.0</temporal.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>io.temporal</groupId>
+      <artifactId>temporal-sdk</artifactId>
+      <version>${temporal.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.temporal</groupId>
+      <artifactId>temporal-testing</artifactId>
+      <version>${temporal.version}</version>
+      <scope>test</scope>
+    </dependency>
+
+    <!-- Integration tests only. Starts real containers; never pulled into `mvn test`. -->
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+
+      <!--
+        Coverage is the most gameable number you can hand an agent. An agent told to
+        reach 90% will reach it with tests that assert almost nothing.
+
+        Branch coverage, not line coverage: line coverage counts a line as covered if
+        it ran once. Exclusions are mandatory, or you get a hundred tests asserting
+        that a getter returns what the setter set.
+
+        This rule is project-wide. Pair it in CI with a diff-coverage check against
+        the merge base, and keep this one as a ratchet that only forbids regression.
+      -->
+      <!--
+        `mvn test` runs the fast suite only: unit and workflow tests, no Docker, no keys.
+        Integration tests are named *IT and picked up by failsafe below, which surefire
+        ignores by default. Keep it that way — the moment the fast suite needs a container,
+        people stop running it.
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <executions>
+          <execution>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>0.8.12</version>
+        <configuration>
+          <excludes>
+            <exclude>**/domain/**</exclude>
+            <exclude>**/config/**</exclude>
+            <exclude>**/OrchestratorApplication.class</exclude>
+          </excludes>
+        </configuration>
+        <executions>
+          <execution>
+            <id>prepare-agent</id>
+            <goals><goal>prepare-agent</goal></goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!--
+        The gate that actually matters. PIT changes the code — flips a conditional,
+        removes a call, alters a return — and checks whether a test fails. A test with
+        no assertions kills no mutants, so a mutation threshold is very hard to fake.
+
+        Verify this works before pointing an agent at it: write a deliberately
+        assertion-free test, confirm coverage passes and mutation fails. If mutation
+        does not fail, the gate is protecting nothing.
+      -->
+      <plugin>
+        <groupId>org.pitest</groupId>
+        <artifactId>pitest-maven</artifactId>
+        <version>1.17.0</version>
+        <configuration>
+          <targetClasses>
+            <param>com.loop.orchestrator.workflow.*</param>
+            <param>com.loop.orchestrator.activity.*</param>
+            <param>com.loop.orchestrator.cost.*</param>
+            <param>com.loop.orchestrator.knowledge.*</param>
+          </targetClasses>
+          <excludedClasses>
+            <param>com.loop.orchestrator.domain.*</param>
+            <param>com.loop.orchestrator.config.*</param>
+          </excludedClasses>
+          <mutationThreshold>70</mutationThreshold>
+          <timestampedReports>false</timestampedReports>
+        </configuration>
+        <dependencies>
+          <dependency>
+            <groupId>org.pitest</groupId>
+            <artifactId>pitest-junit5-plugin</artifactId>
+            <version>1.2.1</version>
+          </dependency>
+        </dependencies>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <!--
+      The CI gates, enabled with -Pgates.
+
+      Off by default on purpose. The codebase is still mostly stubs, so a 90% branch
+      threshold would fail for the wrong reason and teach everyone to pass -DskipTests.
+      Phase 5 of PHASES.md turns this on for real, and its exit check is that a
+      deliberately assertion-free test passes coverage and fails mutation.
+    -->
+    <profile>
+      <id>gates</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.jacoco</groupId>
+            <artifactId>jacoco-maven-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>check</id>
+                <phase>verify</phase>
+                <goals><goal>check</goal></goals>
+                <configuration>
+                  <rules>
+                    <rule>
+                      <element>BUNDLE</element>
+                      <limits>
+                        <limit>
+                          <counter>BRANCH</counter>
+                          <value>COVEREDRATIO</value>
+                          <minimum>0.90</minimum>
+                        </limit>
+                      </limits>
+                    </rule>
+                  </rules>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+
+          <plugin>
+            <groupId>org.pitest</groupId>
+            <artifactId>pitest-maven</artifactId>
+            <executions>
+              <execution>
+                <id>mutation</id>
+                <phase>verify</phase>
+                <goals><goal>mutationCoverage</goal></goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>

@@ -1,0 +1,101 @@
+name: loop
+
+services:
+
+  # ---------------------------------------------------------------- retrieval
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    restart: unless-stopped
+    ports:
+      - "6333:6333"   # REST
+      - "6334:6334"   # gRPC
+    volumes:
+      # Named volumes, not bind mounts. This repository lives under OneDrive, and letting
+      # a file sync client touch a live database directory corrupts it — slowly, and in a
+      # way that looks like a bug in your own code.
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # ------------------------------------------------------------ orchestration
+  temporal-postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+      # POSTGRES_DB is deliberately NOT set. Postgres then defaults it to POSTGRES_USER,
+      # creating a `temporal` database on first boot — which auto-setup needs to connect to
+      # before it can create `temporal_visibility` and lay down the schema.
+      #
+      # Set it to `postgres` and the stack restart-loops on `database "temporal" does not
+      # exist`, because auto-setup connects to DBNAME rather than to the default database.
+    volumes:
+      - temporal-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  temporal:
+    image: temporalio/auto-setup:1.25.2
+    restart: unless-stopped
+    depends_on:
+      temporal-postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_SEEDS: temporal-postgres
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: temporal
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+    ports:
+      - "7233:7233"
+
+  temporal-ui:
+    image: temporalio/ui:2.32.0
+    restart: unless-stopped
+    depends_on:
+      - temporal
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:3000
+    ports:
+      - "8080:8080"
+
+  # ----------------------------------------------------------- model gateway
+  # One OpenAI-compatible endpoint for every agent. Per-agent virtual keys carry
+  # their own spend caps, so a runaway agent stops instead of emptying the budget,
+  # and per-call cost lands in one place instead of eight.
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    restart: unless-stopped
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    environment:
+      LLM_API_KEY: ${LLM_API_KEY}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      STRONG_MODEL: ${STRONG_MODEL}
+      MID_MODEL: ${MID_MODEL}
+      CHEAP_MODEL: ${CHEAP_MODEL}
+      REVIEW_MODEL: ${REVIEW_MODEL}
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    ports:
+      - "4000:4000"
+
+# The dev agent runner is deliberately NOT in this file.
+#
+# OpenHands needs /var/run/docker.sock to spawn its sandbox, which is effectively
+# root on the host. Adding it here would put that socket one `docker compose up`
+# away from every other service. Run it separately, under rootless Docker or
+# Sysbox, once credential scoping has been settled. See README, "Security note".
+
+volumes:
+  qdrant-data:
+  temporal-pg-data:
