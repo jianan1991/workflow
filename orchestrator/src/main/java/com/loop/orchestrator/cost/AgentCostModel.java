@@ -63,8 +63,21 @@ public final class AgentCostModel {
     }
 
     private static Derivation derive(Properties model, String agent, double discount) {
-        String tier = require(model, "agent." + agent + ".tier");
-        String modelId = require(model, "tier." + tier);
+        // A per-agent model wins over its tier. Tiers are a convenient default — "make all
+        // the planning agents cheaper" is one edit — but the moment you want to tune the
+        // one agent carrying most of the bill, naming its model directly is the honest way
+        // to do it rather than inventing a tier of one.
+        String override = model.getProperty("agent." + agent + ".model");
+        String tier;
+        String modelId;
+
+        if (override != null && !override.isBlank()) {
+            tier = "(direct)";
+            modelId = override.trim();
+        } else {
+            tier = require(model, "agent." + agent + ".tier");
+            modelId = require(model, "tier." + tier);
+        }
 
         int inputTokens = (int) readDouble(model, "agent." + agent + ".input-tokens", -1);
         int outputTokens = (int) readDouble(model, "agent." + agent + ".output-tokens", -1);
@@ -76,9 +89,10 @@ public final class AgentCostModel {
         double inputPrice = readDouble(model, "model." + modelId + ".input", -1);
         double outputPrice = readDouble(model, "model." + modelId + ".output", -1);
         if (inputPrice < 0 || outputPrice < 0) {
-            throw new IllegalArgumentException(("no price for model '%s' (tier '%s', needed by "
-                    + "agent '%s') — add model.%s.input and .output")
-                    .formatted(modelId, tier, agent, modelId));
+            throw new IllegalArgumentException(("no price for model '%s' (via %s, needed by "
+                    + "agent '%s') — add model.%s.input and model.%s.output")
+                    .formatted(modelId, "(direct)".equals(tier) ? "a direct agent.model override"
+                            : "tier '" + tier + "'", agent, modelId, modelId));
         }
 
         // Caching only discounts input. Output is generated fresh every time, and on a

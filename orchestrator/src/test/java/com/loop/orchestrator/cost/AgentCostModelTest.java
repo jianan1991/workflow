@@ -122,6 +122,48 @@ class AgentCostModelTest {
     }
 
     @Nested
+    @DisplayName("per-agent model override")
+    class DirectModel {
+
+        @Test
+        @DisplayName("a named model on one agent wins over its tier")
+        void overrideWinsOverTier() {
+            AgentCostModel costs = from(MINIMAL + "\nagent.dev-t2.model=claude-sonnet-5\n");
+
+            assertThat(costs.derivationFor("dev-t2").model()).isEqualTo("claude-sonnet-5");
+            assertThat(costs.derivationFor("dev-t2").tier()).isEqualTo("(direct)");
+        }
+
+        @Test
+        @DisplayName("overriding one agent leaves the others on the tier alone")
+        void overrideIsNarrow() {
+            AgentCostModel costs = from(MINIMAL + "\nagent.dev-t2.model=claude-sonnet-5\n");
+
+            assertThat(costs.derivationFor("pm").model())
+                    .as("dev-t2 shares the strong tier with pm; moving one must not move both")
+                    .isEqualTo("claude-opus-5");
+        }
+
+        @Test
+        @DisplayName("pinning the most expensive agent to a cheaper model moves the whole bill")
+        void overrideChangesCost() {
+            double before = from(MINIMAL).derivationFor("dev-t2").dollars();
+            double after = from(MINIMAL + "\nagent.dev-t2.model=claude-sonnet-5\n")
+                    .derivationFor("dev-t2").dollars();
+
+            assertThat(after).isLessThan(before);
+        }
+
+        @Test
+        @DisplayName("an unpriced override says it came from a direct override, not a tier")
+        void unpricedOverrideIsClear() {
+            assertThatThrownBy(() -> from(MINIMAL + "\nagent.qa.model=claude-imaginary-9\n"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("direct agent.model override");
+        }
+    }
+
+    @Nested
     @DisplayName("prompt caching")
     class Caching {
 

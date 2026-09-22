@@ -48,7 +48,7 @@ boundaries rot between them.
 
 | Phase | | Last verified |
 | :-- | :-- | :-- |
-| 0 · Baseline | ◐ collector built, needs a repo and 14 days of tally | 2026-09-22 |
+| 0 · Baseline | ◐ greenfield — no history to measure, forward tally only | 2026-09-22 |
 | 1 · Cost of one epic | ◐ costs derived from real prices, token counts still estimates | 2026-09-22 |
 | 2 · Infrastructure | ☑ **done** | 2026-09-22 |
 | 3 · Retrieval | ◐ automated + integration green, manual pass outstanding | 2026-09-22 |
@@ -90,28 +90,33 @@ A stub that always succeeds tests nothing.
 
 ## Phase 0 — Baseline
 
-**Delivers:** two weeks of numbers describing how the team works today.
+**Decided 2026-09-22: this is a greenfield project.** There is no prior repository, no
+merged pull requests, no cycle time. The before-and-after comparison the original plan
+assumed cannot be made, and pretending otherwise would be worse than admitting it.
 
-**Exit checks**
+**What this costs you.** Screen 12 ("is this working?") loses its comparison, and the
+question *did the pipeline save time* becomes unanswerable for this project. That was the
+falsifiability argument in the original plan, and it is now gone. Accept it deliberately
+rather than discovering it in three months.
 
-```bash
-export GITHUB_TOKEN=ghp_...
-python scripts/baseline.py --repo owner/name --days 14
-```
+**What is still worth measuring, from today forward**
 
-- [x] Collector written — `scripts/baseline.py`, reproducible, writes `baseline/pull-requests.csv`
-- [ ] Run against the real repository (blocked on Q1: which repo)
-- [ ] Median PR-opened-to-merged time, for a 14-day window
-- [ ] PRs merged per engineer per week
-- [ ] **Review hours per engineer per week** — tally by hand in `baseline/review-hours.csv`
+- [x] Decision recorded: no historical baseline exists
+- [ ] Review-hours tally started in `baseline/review-hours.csv` — **from today, going
+      forward**. It is the only number that will tell you whether reviewing machine output
+      is sustainable, and it works without a before-picture
+- [ ] Cycle time recorded per epic from the pipeline's own data once epics run for real
+- [ ] `scripts/baseline.py` kept for the day this points at a repository with history —
+      it is written and tested, just not applicable yet
 
-**Review hours cannot be derived from any API.** GitHub records when a review was
-submitted, never how long it took. Do not substitute review *latency* for it: a PR that sat
-six hours and took four minutes to read is not six hours of anyone's attention, and treating
-it as such makes the pipeline look like it saved time it never cost.
+**Stop if:** the review-hours tally is not started before the first real agent runs. Without
+a before-picture, the *trend* in review hours is the only evidence you will ever have, and a
+trend needs a first data point taken before the thing you are measuring changes.
 
-**Stop if:** you cannot collect them. Without a baseline the POC ends in a feeling rather
-than an answer, and every later phase is unfalsifiable.
+**The substitute for a baseline.** Since there is nothing to compare against, the POC has to
+be judged on absolute numbers instead: review hours per week, rework loops per story,
+questions per epic, and cost per merged story. All four are already instrumented. Decide the
+thresholds you would walk away at *now*, while nobody is invested in the answer.
 
 ---
 
