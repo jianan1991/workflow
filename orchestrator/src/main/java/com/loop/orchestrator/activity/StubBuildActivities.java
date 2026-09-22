@@ -9,10 +9,11 @@ import com.loop.orchestrator.domain.Domain.Story;
 import com.loop.orchestrator.domain.Domain.StoryState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 
 /**
  * Stub build agents. Nothing is compiled, no container is started, no model is called.
+ *
+ * <p>Not a Spring bean — see StubPlanningActivities for why.
  *
  * <p>The failure pattern is deliberate rather than random: it exercises each of the three
  * QA routes at least once across a six-story epic, so the orchestration can be proved
@@ -24,7 +25,6 @@ import org.springframework.stereotype.Component;
  *   <li>tier 2 review flags scope, which blocks auto-approval
  * </ul>
  */
-@Component
 public class StubBuildActivities implements BuildActivities {
 
     private static final Logger log = LoggerFactory.getLogger(StubBuildActivities.class);

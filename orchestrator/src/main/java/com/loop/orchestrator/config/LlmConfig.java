@@ -53,6 +53,17 @@ public class LlmConfig {
             ]}
             """;
 
+    /**
+     * The PM makes two different calls, so the script has to tell them apart by the system
+     * prompt it was given. Keying only on the agent name returns a journey to a question
+     * request - which the agent then rejects, correctly and confusingly.
+     */
+    private static final String SCRIPTED_PM_QUESTION = """
+            {"question":"Who grants a higher limit, and how quickly? If the answer is self-serve, this epic gains an admin surface and roughly doubles in size.",
+             "searchQueries":["rate limit increase","plan ceiling approval","who approves a higher limit"],
+             "targetKbFile":"throttling-policy.md"}
+            """;
+
     /** The same journey with the gap closed, for the re-map after a person answers. */
     private static final String SCRIPTED_PM_JOURNEY_SETTLED =
             SCRIPTED_PM_JOURNEY.replace("\"coverage\":\"GAP\"", "\"coverage\":\"KNOWN\"");
@@ -127,10 +138,14 @@ public class LlmConfig {
 
         // Answering a question closes the gap, so the epic can proceed on the second pass.
         // That is what makes the block-and-resume path runnable without a model.
-        script.put(PmAgent.NAME, request ->
-                request.user().contains("Decisions already made")
-                        ? SCRIPTED_PM_JOURNEY_SETTLED
-                        : SCRIPTED_PM_JOURNEY);
+        script.put(PmAgent.NAME, request -> {
+            if (request.system().contains("Write the question you would ask")) {
+                return SCRIPTED_PM_QUESTION;
+            }
+            return request.user().contains("Decisions already made")
+                    ? SCRIPTED_PM_JOURNEY_SETTLED
+                    : SCRIPTED_PM_JOURNEY;
+        });
 
         script.put(BaAgent.NAME, request -> SCRIPTED_BA_CRITERIA);
 
@@ -226,6 +241,23 @@ public class LlmConfig {
             log.warn(assessment.warningBanner());
         }
         return assessment;
+    }
+
+    /**
+     * Shared by the estimator and the reviewer-independence check, so the model a figure is
+     * priced against is the same one that gets called and the same one that gets warned about.
+     */
+    @Bean
+    public AgentCostModel agentCostModel(
+            @Value("${cost.model-file:../cost-model.properties}") String costModelFile) {
+
+        Properties properties = new Properties();
+        try (Reader reader = Files.newBufferedReader(Path.of(costModelFile))) {
+            properties.load(reader);
+        } catch (IOException e) {
+            throw new UncheckedIOException("could not read the cost model at " + costModelFile, e);
+        }
+        return new AgentCostModel(properties);
     }
 
     @Bean

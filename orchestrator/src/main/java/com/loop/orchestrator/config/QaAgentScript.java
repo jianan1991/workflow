@@ -31,12 +31,20 @@ final class QaAgentScript {
         List<String> verdicts = new ArrayList<>();
         Matcher matcher = CRITERION.matcher(request.user());
 
+        // The real agent is built to return UNVERIFIABLE for everything when nothing ran.
+        // A script that reported passes here would hide exactly the failure that behaviour
+        // exists to prevent - a pipeline reporting green while executing nothing.
+        boolean nothingRan = request.user().contains("Nothing was captured");
+
         while (matcher.find()) {
             String id = matcher.group(1);
             String text = matcher.group(2).toLowerCase();
             String testability = matcher.group(3);
 
-            if ("HUMAN_ONLY".equals(testability) || "OBSERVABLE".equals(testability)) {
+            if (nothingRan) {
+                verdicts.add(verdict(id, "UNVERIFIABLE",
+                        "Nothing was captured; no observation settles this."));
+            } else if ("HUMAN_ONLY".equals(testability) || "OBSERVABLE".equals(testability)) {
                 // Captured, not judged. These become a person's checklist rather than a
                 // failure, and they were already flagged at the epic gate.
                 verdicts.add(verdict(id, "UNVERIFIABLE",
@@ -59,7 +67,7 @@ final class QaAgentScript {
                  "evidence":"With Redis stopped, 1000 of 1000 requests returned 200. The limiter fails open and no criterion covers it."}""";
 
         return "{\"verdicts\":[" + String.join(",", verdicts) + "],\"concerns\":["
-                + (verdicts.isEmpty() ? "" : concerns) + "]}";
+                + (verdicts.isEmpty() || nothingRan ? "" : concerns) + "]}";
     }
 
     private static String verdict(String id, String outcome, String evidence) {

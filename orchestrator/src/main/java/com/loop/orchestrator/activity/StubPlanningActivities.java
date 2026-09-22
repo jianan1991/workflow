@@ -14,7 +14,6 @@ import com.loop.orchestrator.domain.Domain.Story;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.io.Reader;
@@ -29,6 +28,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * Stub agents. No model is called and nothing is written anywhere.
  *
+ * <p>Not a Spring bean. The running system uses the agent-backed activities; this
+ * exists so orchestration can be tested without any agent in the picture at all —
+ * which is the only way to tell an orchestration bug from an agent one.
+ *
  * <p>This exists so the orchestration can be proved on its own — start an epic, watch the
  * workflow block on a human for as long as it takes, kill the worker, restart it, and see
  * the workflow resume where it was. If that does not work, nothing built on top of it will.
@@ -37,7 +40,6 @@ import java.util.concurrent.atomic.AtomicInteger;
  * mapping only, and its gap questions get validated against ones a person would actually
  * have asked before any story is generated.
  */
-@Component
 public class StubPlanningActivities implements PlanningActivities {
 
     private static final Logger log = LoggerFactory.getLogger(StubPlanningActivities.class);

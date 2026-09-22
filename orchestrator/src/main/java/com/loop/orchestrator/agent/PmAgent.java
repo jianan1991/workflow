@@ -8,6 +8,8 @@ import com.loop.orchestrator.domain.Domain.Coverage;
 import com.loop.orchestrator.domain.Domain.Epic;
 import com.loop.orchestrator.domain.Domain.Journey;
 import com.loop.orchestrator.domain.Domain.JourneyStage;
+import com.loop.orchestrator.domain.Domain.Question;
+import com.loop.orchestrator.knowledge.Knowledge.SearchOutcome;
 import com.loop.orchestrator.knowledge.Knowledge.Hit;
 import com.loop.orchestrator.knowledge.KnowledgeIndexer;
 import com.loop.orchestrator.llm.ChatModel;
@@ -63,6 +65,109 @@ public class PmAgent {
         this.model = model;
         this.knowledge = knowledge;
         this.maxOutputTokens = maxOutputTokens;
+    }
+
+    private static final String QUESTION_SYSTEM = """
+            A stage of a customer journey has a gap - nobody has decided it, and it changes
+            what gets built. Your job is to get it settled.
+
+            Write the question you would ask a person. One question, answerable in a
+            sentence or two. Say what each possible answer would change, because that is
+            what makes a busy person answer it now rather than later.
+
+            Also give up to three different phrasings that might find the answer already
+            written down somewhere. Vary the vocabulary - the note you are looking for was
+            written by someone who used different words than the ticket does.
+
+            Name the knowledge-base file the answer should be committed to, so it is
+            settled once rather than asked again next quarter.
+
+            Reply with JSON only, no prose and no code fence:
+            {"question":"...","searchQueries":["...","...","..."],"targetKbFile":"kb/x.md"}
+            """;
+
+    /**
+     * Turns a gap into a question for a person - but searches first.
+     *
+     * <p>The agent proposes its own phrasings and they are run against the knowledge base
+     * before anybody is interrupted. Two things come out of that: sometimes the answer is
+     * already written down, and when it is not, the queries that failed are recorded on the
+     * question. "Three of three attempts used, no usable hit" is what separates a real gap
+     * from an agent that gave up after one try, and it is the only honest read on whether
+     * retrieval is working.
+     */
+    public Question raiseQuestion(String questionId, Epic epic, JourneyStage gap) {
+        ChatModel.ChatResponse response = model.complete(new ChatModel.ChatRequest(
+                NAME, QUESTION_SYSTEM, buildQuestionPrompt(epic, gap), maxOutputTokens));
+
+        Drafted drafted = parseQuestion(response.text(), epic.id(), gap.index());
+        SearchOutcome outcome = knowledge.searchUntilSufficient(drafted.searchQueries(), 5);
+
+        log.info("[pm] {} stage {} — {} of {} searches used, {}",
+                epic.id(), gap.index(), outcome.queriesTried().size(), outcome.attemptsAllowed(),
+                outcome.sufficient() ? "found something; asking anyway" : "nothing found");
+
+        return new Question(questionId, NAME, drafted.question(),
+                outcome.queriesTried(), outcome.attemptsAllowed(),
+                drafted.targetKbFile(), gap.index());
+    }
+
+    String buildQuestionPrompt(Epic epic, JourneyStage gap) {
+        return """
+                # Epic %s: %s
+
+                %s
+
+                # The stage nobody has decided
+
+                Stage %d: %s
+                %s
+                """.formatted(epic.id(), epic.title(), epic.body(),
+                gap.index(), gap.name(), gap.description());
+    }
+
+    static Drafted parseQuestion(String reply, String epicId, int stageIndex) {
+        String where = epicId + " stage " + stageIndex;
+        String cleaned = AgentReply.stripFence(reply);
+
+        JsonNode root;
+        try {
+            root = JSON.readTree(cleaned);
+        } catch (JsonProcessingException e) {
+            throw new AgentReplyException(NAME, where,
+                    "reply was not valid JSON: " + AgentReply.preview(cleaned), e);
+        }
+
+        String question = root.path("question").asText("").trim();
+        if (question.isBlank()) {
+            // Blocking an epic without saying what would unblock it wastes the one
+            // interruption you get.
+            throw new AgentReplyException(NAME, where,
+                    "no question - an epic cannot be blocked on nothing", null);
+        }
+
+        List<String> queries = new ArrayList<>();
+        root.path("searchQueries").forEach(node -> {
+            String query = node.asText("").trim();
+            if (!query.isBlank()) {
+                queries.add(query);
+            }
+        });
+        if (queries.isEmpty()) {
+            // Without attempted searches the question carries no evidence the gap is real,
+            // and the queue cannot tell a genuine gap from a lazy agent.
+            throw new AgentReplyException(NAME, where,
+                    "no search queries - a question with nothing tried behind it is "
+                            + "indistinguishable from not looking", null);
+        }
+
+        String targetFile = root.path("targetKbFile").asText("").trim();
+        return new Drafted(question, List.copyOf(queries),
+                targetFile.isBlank() ? "kb/decisions.md" : targetFile);
+    }
+
+    /** What the model drafted, before the searches are actually run. */
+    record Drafted(String question, List<String> searchQueries, String targetKbFile) {
     }
 
     public Journey mapJourney(Epic epic, List<Answer> answers) {
