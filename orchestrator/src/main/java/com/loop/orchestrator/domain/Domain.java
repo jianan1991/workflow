@@ -233,6 +233,20 @@ public final class Domain {
      */
     public enum QaOutcome {PASS, CODE_DEFECT, CRITERION_WRONG, UNVERIFIABLE}
 
+    /**
+     * The pull request a person is asked to look at.
+     *
+     * <p>{@code opened} is separate from a non-null url on purpose. "No pull request was
+     * opened and here is why" is a state the workflow has to carry to a human, and an
+     * empty string would read as one that opened without a link.
+     */
+    public record PullRequest(int number, String url, boolean opened, String note) {
+
+        public static PullRequest notOpened(String why) {
+            return new PullRequest(0, "", false, why);
+        }
+    }
+
     public record QaResult(QaOutcome outcome,
                            String evidence,
                            int unverifiableCount,
@@ -309,6 +323,7 @@ public final class Domain {
                               int reworkLoops,
                               boolean autoApproved,
                               double costUsd,
+                              String pullRequestUrl,
                               String note) {
     }
 

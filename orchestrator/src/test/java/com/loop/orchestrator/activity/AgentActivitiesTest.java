@@ -8,6 +8,11 @@ import com.loop.orchestrator.agent.PmAgent;
 import com.loop.orchestrator.agent.QaAgent;
 import com.loop.orchestrator.agent.ReviewerAgent;
 import com.loop.orchestrator.cost.AgentCostModel;
+import com.loop.orchestrator.delivery.Diff;
+import com.loop.orchestrator.delivery.ScriptedBuildRunner;
+import com.loop.orchestrator.delivery.ScriptedPullRequests;
+import com.loop.orchestrator.delivery.ScriptedSourceControl;
+import com.loop.orchestrator.delivery.SourceControl;
 import com.loop.orchestrator.domain.Domain.AcceptanceCriterion;
 import com.loop.orchestrator.domain.Domain.Agent;
 import com.loop.orchestrator.domain.Domain.CiResult;
@@ -68,6 +73,7 @@ class AgentActivitiesTest {
     private static final class RecordingChatModel implements ChatModel {
         private final ChatModel delegate;
         private final List<String> agentsCalled = new ArrayList<>();
+        private String lastUserPrompt = "";
 
         RecordingChatModel(ChatModel delegate) {
             this.delegate = delegate;
@@ -76,6 +82,7 @@ class AgentActivitiesTest {
         @Override
         public ChatResponse complete(ChatRequest request) {
             agentsCalled.add(request.agent());
+            lastUserPrompt = request.user();
             return delegate.complete(request);
         }
 
@@ -156,8 +163,33 @@ class AgentActivitiesTest {
     }
 
     private AgentBuildActivities build(DevAgent dev) {
+        return build(dev, new ScriptedSourceControl());
+    }
+
+    private AgentBuildActivities build(DevAgent dev, SourceControl scm) {
         return new AgentBuildActivities(
-                new ReviewerAgent(model, 4096), new QaAgent(model, 4096), dev);
+                new ReviewerAgent(model, 4096), new QaAgent(model, 4096), dev,
+                scm, new ScriptedBuildRunner(), new ScriptedPullRequests());
+    }
+
+    /** A repository that hands back one diff, so the reviewer can be given real code. */
+    private static SourceControl sourceControlReturning(Diff diff) {
+        return new SourceControl() {
+            @Override
+            public Diff diffFor(String branch) {
+                return diff;
+            }
+
+            @Override
+            public String currentBranch() {
+                return "feat/loop-14-3";
+            }
+
+            @Override
+            public String describe() {
+                return "a fixed diff, for a test";
+            }
+        };
     }
 
     /** Build activities whose QA agent returns one exact reply, for the routing tests. */
@@ -168,7 +200,8 @@ class AgentActivitiesTest {
 
         return new AgentBuildActivities(
                 new ReviewerAgent(scripted, 4096), new QaAgent(scripted, 4096),
-                new ScriptedDevAgent());
+                new ScriptedDevAgent(), new ScriptedSourceControl(),
+                new ScriptedBuildRunner(), new ScriptedPullRequests());
     }
 
     @Nested
@@ -264,7 +297,7 @@ class AgentActivitiesTest {
         @Test
         @DisplayName("review goes through the reviewer agent")
         void reviewGoesThroughTheAgent() {
-            var review = build().review(STORY, CRITERIA, Agent.SENIOR, 1);
+            var review = build().review(STORY, CRITERIA, Agent.SENIOR, "feat/loop-14-3", 1);
 
             assertThat(model.agentsCalled).containsExactly(ReviewerAgent.NAME);
             assertThat(review.verdict()).isNotBlank();
@@ -327,7 +360,7 @@ class AgentActivitiesTest {
         @Test
         @DisplayName("an unwired CI reports that it measured nothing, rather than a pass")
         void unwiredCiDoesNotReportAPass() {
-            CiResult ci = build().runCi(STORY, 1);
+            CiResult ci = build().runCi(STORY, "feat/loop-14-3", 1);
 
             assertThat(ci.measured()).isFalse();
             assertThat(ci.passed())
@@ -371,6 +404,32 @@ class AgentActivitiesTest {
             assertThat(build().mayAutoApprove(tierOne, clean, measured))
                     .as("the guards must not have closed the auto-approval path altogether")
                     .isTrue();
+        }
+
+        @Test
+        @DisplayName("the reviewer is handed the diff the repository actually reports")
+        void reviewerSeesTheRealDiff() {
+            String patch = """
+                    diff --git a/src/main/java/Limiter.java b/src/main/java/Limiter.java
+                    --- a/src/main/java/Limiter.java
+                    +++ b/src/main/java/Limiter.java
+                    @@ -10,6 +10,9 @@
+                     public class Limiter {
+                    +    public boolean allow(String tenant) {
+                    +        return buckets.get(tenant).tryConsume();
+                    +    }
+                     }
+                    """;
+            Diff diff = new Diff(patch, java.util.List.of(), false);
+
+            build(new ScriptedDevAgent(), sourceControlReturning(diff))
+                    .review(STORY, CRITERIA, Agent.SENIOR, "feat/loop-14-3", 1);
+
+            assertThat(model.lastUserPrompt)
+                    .as("the reviewer used to be handed the literal string \"(no diff "
+                            + "— the dev agent is not wired)\", hardcoded, which stayed in "
+                            + "place even once a dev agent was dispatching for real")
+                    .contains("tryConsume");
         }
 
         @Test
@@ -436,8 +495,8 @@ class AgentActivitiesTest {
         @Test
         @DisplayName("a tier 2 story never auto-approves, whatever the reviewer says")
         void tierTwoNeverAutoApproves() {
-            var review = build().review(STORY, CRITERIA, Agent.SENIOR, 1);
-            var ci = build().runCi(STORY, 1);
+            var review = build().review(STORY, CRITERIA, Agent.SENIOR, "feat/loop-14-3", 1);
+            var ci = build().runCi(STORY, "feat/loop-14-3", 1);
 
             assertThat(build().mayAutoApprove(STORY, review, ci)).isFalse();
         }

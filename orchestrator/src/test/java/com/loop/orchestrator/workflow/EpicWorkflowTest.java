@@ -53,12 +53,12 @@ class EpicWorkflowTest {
     public static class ReviewerExplodesOnStoryTwo extends StubBuildActivities {
         @Override
         public ReviewResult review(Story story, List<AcceptanceCriterion> criteria,
-                                   Agent author, int attempt) {
+                                   Agent author, String branch, int attempt) {
             if (story.id().endsWith("-2")) {
                 throw new IllegalStateException(
                         "model call for 'reviewer' failed with 429 via litellm");
             }
-            return super.review(story, criteria, author, attempt);
+            return super.review(story, criteria, author, branch, attempt);
         }
     }
 

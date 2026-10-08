@@ -7,6 +7,7 @@ import com.loop.orchestrator.domain.Domain.CiResult;
 import com.loop.orchestrator.domain.Domain.Gate;
 import com.loop.orchestrator.domain.Domain.GateDecision;
 import com.loop.orchestrator.domain.Domain.ImplementResult;
+import com.loop.orchestrator.domain.Domain.PullRequest;
 import com.loop.orchestrator.domain.Domain.QaResult;
 import com.loop.orchestrator.domain.Domain.ReviewResult;
 import com.loop.orchestrator.domain.Domain.Story;
@@ -76,6 +77,17 @@ public class StoryWorkflowImpl implements StoryWorkflow {
     private double costUsd;
     private String note = "";
 
+    /**
+     * The branch the dev agent produced. Carried in workflow state because everything
+     * downstream is a question about it: which tree CI measures, which change the reviewer
+     * reads, and what the pull request is opened from. It used to be returned by the
+     * implement activity and thrown away on the next line.
+     */
+    private String branch = "";
+
+    /** Where a person goes to decide. Empty until the pull request is opened. */
+    private String pullRequestUrl = "";
+
     private GateDecision prDecision;
 
     @Override
@@ -120,8 +132,10 @@ public class StoryWorkflowImpl implements StoryWorkflow {
                 continue;
             }
 
+            branch = implemented.branch();
+
             state = StoryState.CI;
-            CiResult ci = build.runCi(story, devAttempts);
+            CiResult ci = build.runCi(story, branch, devAttempts);
 
             // Three outcomes, not two. A build that ran and failed is the agent's problem
             // and goes back round. A build that did not run is nobody's problem to fix by
@@ -142,7 +156,7 @@ public class StoryWorkflowImpl implements StoryWorkflow {
             }
 
             state = StoryState.REVIEW;
-            ReviewResult review = build.review(story, criteria, agent, devAttempts);
+            ReviewResult review = build.review(story, criteria, agent, branch, devAttempts);
             costUsd += review.costUsd();
             if (!review.matchesCriteria()) {
                 previousFailure = review.verdict();
@@ -188,13 +202,35 @@ public class StoryWorkflowImpl implements StoryWorkflow {
                 }
             }
 
-            if (build.mayAutoApprove(story, review, ci)) {
+            // The pull request is opened either way. An auto-approved story still needs
+            // a record a person can read afterwards, and the shadow-mode period in phase 11
+            // depends on being able to compare what the machine decided against what a
+            // reviewer would have.
+            PullRequest pullRequest = build.openPullRequest(story, branch, ci, review, qa);
+            pullRequestUrl = pullRequest.url();
+
+            if (!pullRequest.opened()) {
+                // Not a blocked story. The work is done and the hand-off is what is
+                // missing, which is a person's problem to resolve rather than an agent's
+                // to retry - and blocking here would stop the scripted pipeline from
+                // running end to end at all, which is the one thing it is for.
+                log.warn("story {} has no pull request to show: {}",
+                        story.id(), pullRequest.note());
+            }
+
+            // No pull request, no automatic merge. Not because the checks failed but
+            // because there is nothing to merge, and recording a story as MERGED when
+            // nothing was is the exact failure this chain was built to end.
+            if (pullRequest.opened() && build.mayAutoApprove(story, review, ci)) {
                 autoApproved = true;
                 return merge("auto-approved: tier 1, all checks clear");
             }
 
             state = StoryState.AWAITING_PR_REVIEW;
-            note = "gate 3 — " + review.verdict();
+            note = pullRequest.opened()
+                    ? "gate 3 — " + review.verdict()
+                    : "gate 3, with no pull request to read (" + pullRequest.note() + ") — "
+                            + review.verdict();
 
             boolean decided = Workflow.await(PR_REVIEW_TIMEOUT, () -> prDecision != null);
             if (!decided) {
@@ -275,7 +311,7 @@ public class StoryWorkflowImpl implements StoryWorkflow {
                 story == null ? "" : story.id(),
                 story == null ? 0 : story.tier(),
                 agent, state, devAttempts, qaRuns, reworkLoops,
-                autoApproved, round4(costUsd), note);
+                autoApproved, round4(costUsd), pullRequestUrl, note);
     }
 
     /**

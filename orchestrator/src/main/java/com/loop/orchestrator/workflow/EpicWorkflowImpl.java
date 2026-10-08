@@ -246,7 +246,7 @@ public class EpicWorkflowImpl implements EpicWorkflow {
         return new StoryStatus(
                 story.id(), story.tier(),
                 story.tier() == 1 ? Agent.MID : Agent.SENIOR,
-                StoryState.BLOCKED, 0, 0, 0, false, 0.0,
+                StoryState.BLOCKED, 0, 0, 0, false, 0.0, "",
                 "the story workflow failed outright: " + rootMessage(failure)
                         + " — whatever it spent before it died is not in this figure");
     }

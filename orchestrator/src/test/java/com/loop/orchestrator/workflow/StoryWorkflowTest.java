@@ -219,6 +219,48 @@ class StoryWorkflowTest {
         assertThat(merged.autoApproved()).isFalse();
     }
 
+    @Test
+    @DisplayName("a tier 1 story with no pull request waits for a person instead of auto-merging")
+    void noPullRequestMeansNoAutoApproval() {
+        Story story = new Story("LOOP-14-5",
+                StubBuildActivities.PR_FAILS_MARKER + " Tenant config lookup", 1, List.of());
+
+        StoryWorkflow workflow = start(story, false);
+        StoryStatus waiting = await(workflow, s -> s.state() == StoryState.AWAITING_PR_REVIEW);
+
+        assertThat(waiting.autoApproved())
+                .as("every check passed, so this would have auto-merged — but recording a "
+                        + "story as MERGED when no pull request exists is the exact failure "
+                        + "this chain was built to end")
+                .isFalse();
+        assertThat(waiting.pullRequestUrl()).isEmpty();
+        assertThat(waiting.note())
+                .as("a person is told there is no pull request to read, rather than left "
+                        + "to wonder where it is")
+                .contains("no pull request to read", "no commits between");
+
+        workflow.decidePullRequest(
+                new GateDecision(Gate.PULL_REQUEST, true, "read the branch by hand"));
+
+        StoryStatus merged = WorkflowStub.fromTyped(workflow).getResult(StoryStatus.class);
+        assertThat(merged.state()).isEqualTo(StoryState.MERGED);
+        assertThat(merged.autoApproved()).isFalse();
+    }
+
+    @Test
+    @DisplayName("a merged story carries the pull request a person decided on")
+    void mergedStoryCarriesItsPullRequest() {
+        Story story = new Story("LOOP-14-1", "Tenant config lookup", 1, List.of());
+
+        StoryStatus result = runToCompletion(story, true);
+
+        assertThat(result.state()).isEqualTo(StoryState.MERGED);
+        assertThat(result.pullRequestUrl())
+                .as("the branch used to be returned by the implement activity and dropped "
+                        + "on the next line; nothing downstream could point at the change")
+                .contains("/pull/");
+    }
+
     // ------------------------------------------------------------------ setup
 
     private StoryWorkflow start(Story story, boolean useTimeskipping) {

@@ -136,6 +136,15 @@
           </excludedClasses>
           <mutationThreshold>70</mutationThreshold>
           <timestampedReports>false</timestampedReports>
+          <!--
+            XML as well as HTML. HTML is for a person reading the report; XML is the only
+            form a machine can read, and the CI gate now parses the mutation score out of
+            it to decide whether a story may merge unwatched.
+          -->
+          <outputFormats>
+            <param>HTML</param>
+            <param>XML</param>
+          </outputFormats>
         </configuration>
         <dependencies>
           <dependency>

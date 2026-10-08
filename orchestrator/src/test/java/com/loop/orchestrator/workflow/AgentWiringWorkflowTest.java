@@ -10,6 +10,9 @@ import com.loop.orchestrator.agent.ReviewerAgent;
 import com.loop.orchestrator.agent.ScriptedDevAgent;
 import com.loop.orchestrator.config.LlmConfig;
 import com.loop.orchestrator.cost.AgentCostModel;
+import com.loop.orchestrator.delivery.ScriptedBuildRunner;
+import com.loop.orchestrator.delivery.ScriptedPullRequests;
+import com.loop.orchestrator.delivery.ScriptedSourceControl;
 import com.loop.orchestrator.domain.Domain.Answer;
 import com.loop.orchestrator.domain.Domain.Epic;
 import com.loop.orchestrator.domain.Domain.EpicStatus;
@@ -122,6 +125,11 @@ class AgentWiringWorkflowTest {
                             + "sent %s round the loop six times at full price and ended in "
                             + "the same place", story.storyId())
                     .isEqualTo(1);
+
+            assertThat(story.pullRequestUrl())
+                    .as("pr.provider=scripted opens nothing, and %s must not carry a link "
+                            + "to something that does not exist", story.storyId())
+                    .isEmpty();
         });
     }
 
@@ -149,7 +157,10 @@ class AgentWiringWorkflowTest {
                 new AgentBuildActivities(
                         new ReviewerAgent(model, 4096),
                         new QaAgent(model, 4096),
-                        new ScriptedDevAgent()));
+                        new ScriptedDevAgent(),
+                        new ScriptedSourceControl(),
+                        new ScriptedBuildRunner(),
+                        new ScriptedPullRequests()));
         env.start();
 
         EpicWorkflow workflow = env.getWorkflowClient().newWorkflowStub(

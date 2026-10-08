@@ -4,6 +4,7 @@ import com.loop.orchestrator.domain.Domain.AcceptanceCriterion;
 import com.loop.orchestrator.domain.Domain.Agent;
 import com.loop.orchestrator.domain.Domain.CiResult;
 import com.loop.orchestrator.domain.Domain.ImplementResult;
+import com.loop.orchestrator.domain.Domain.PullRequest;
 import com.loop.orchestrator.domain.Domain.QaResult;
 import com.loop.orchestrator.domain.Domain.ReviewResult;
 import com.loop.orchestrator.domain.Domain.Story;
@@ -44,11 +45,22 @@ public interface BuildActivities {
      * can hand an agent — told to reach 90% it will, with tests that call every method and
      * assert almost nothing. A test with no assertions kills no mutants.
      */
-    CiResult runCi(Story story, int attempt);
+    CiResult runCi(Story story, String branch, int attempt);
 
     /** Reviewer agent. Runs on a different model family from whichever agent authored. */
     ReviewResult review(Story story, List<AcceptanceCriterion> criteria,
-                        Agent author, int attempt);
+                        Agent author, String branch, int attempt);
+
+    /**
+     * Open the pull request a person is asked to decide on.
+     *
+     * <p>Called before the workflow waits at gate 3, because a gate that asks somebody to
+     * approve something they cannot see is not a gate. Until this existed,
+     * {@code StoryState.MERGED} was a label the workflow set on itself with no branch
+     * pushed and nothing for a reviewer to click.
+     */
+    PullRequest openPullRequest(Story story, String branch, CiResult ci,
+                                ReviewResult review, QaResult qa);
 
     /**
      * QA agent. Boots the app against a throwaway database, calls the real endpoints, and

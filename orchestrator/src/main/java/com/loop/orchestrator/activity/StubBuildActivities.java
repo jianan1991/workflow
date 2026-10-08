@@ -4,6 +4,7 @@ import com.loop.orchestrator.domain.Domain.AcceptanceCriterion;
 import com.loop.orchestrator.domain.Domain.Agent;
 import com.loop.orchestrator.domain.Domain.CiResult;
 import com.loop.orchestrator.domain.Domain.ImplementResult;
+import com.loop.orchestrator.domain.Domain.PullRequest;
 import com.loop.orchestrator.domain.Domain.QaOutcome;
 import com.loop.orchestrator.domain.Domain.QaResult;
 import com.loop.orchestrator.domain.Domain.ReviewResult;
@@ -59,6 +60,13 @@ public class StubBuildActivities implements BuildActivities {
      */
     public static final String CI_UNMEASURED_MARKER = "[ci-unmeasured]";
 
+    /**
+     * The change is fine and the hand-off is broken: no pull request could be opened. A
+     * story in this state must still reach a person, and must not auto-approve, because
+     * there is nothing to merge.
+     */
+    public static final String PR_FAILS_MARKER = "[pr-fails]";
+
     @Override
     public ImplementResult implement(Story story, List<AcceptanceCriterion> criteria,
                                      Agent agent, int attempt, String previousFailure) {
@@ -80,7 +88,7 @@ public class StubBuildActivities implements BuildActivities {
     }
 
     @Override
-    public CiResult runCi(Story story, int attempt) {
+    public CiResult runCi(Story story, String branch, int attempt) {
         // Mutation score is the real gate. A first-attempt tier 2 story lands just under
         // it — the tests ran and asserted too little, which is exactly what a coverage-only
         // gate would have waved through.
@@ -102,7 +110,7 @@ public class StubBuildActivities implements BuildActivities {
 
     @Override
     public ReviewResult review(Story story, List<AcceptanceCriterion> criteria,
-                               Agent author, int attempt) {
+                               Agent author, String branch, int attempt) {
         boolean scopeExceeded = story.tier() == 2;
 
         ReviewResult result = scopeExceeded
@@ -113,6 +121,24 @@ public class StubBuildActivities implements BuildActivities {
 
         log.info("[reviewer] {} (author {}) -> {}", story.id(), author, result.verdict());
         return result;
+    }
+
+    @Override
+    public PullRequest openPullRequest(Story story, String branch, CiResult ci,
+                                       ReviewResult review, QaResult qa) {
+        if (story.title().startsWith(PR_FAILS_MARKER)) {
+            return PullRequest.notOpened("no commits between main and " + branch);
+        }
+
+        // A plausible number and url, because a stub returning "not opened" would make the
+        // gate-3 path untestable - the workflow has to be able to put a link in front of a
+        // person and then act on their decision.
+        int number = 100 + story.id().hashCode() % 100;
+        log.info("[pr] {} would open #{} from {}", story.id(), number, branch);
+
+        return new PullRequest(number,
+                "https://example.invalid/loop/pull/" + number, true,
+                "opened by the stub");
     }
 
     @Override

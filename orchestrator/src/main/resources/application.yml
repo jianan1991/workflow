@@ -48,6 +48,54 @@ dev:
   # up on a run that is still going and retries it on a half-edited workspace.
   timeout-minutes: ${DEV_TIMEOUT_MINUTES:20}
 
+# The three steps between an agent's branch and a pull request a person can read.
+# All default to off. Each one refuses to start if switched on without what it needs,
+# because the expensive failure here is a pipeline that looks like it is working.
+scm:
+  # scripted = reads no repository. The reviewer is told there is no diff.
+  # git      = real `git diff base...branch` in dev.workspace.
+  provider: ${SCM_PROVIDER:scripted}
+  executable: ${SCM_EXECUTABLE:git}
+
+  # What a branch is compared against, and what pull requests are opened against.
+  base-branch: ${SCM_BASE_BRANCH:main}
+
+ci:
+  # scripted = no build, nothing measured, nothing can auto-approve.
+  # maven    = runs the repository's own build and measures the diff.
+  provider: ${CI_PROVIDER:scripted}
+
+  # On Windows this must be mvn.cmd. ProcessBuilder does not apply PATHEXT the way a shell
+  # does, so a bare `mvn` is reported as "could not start" rather than found.
+  executable: ${CI_EXECUTABLE:mvn}
+
+  # Where the Maven project sits inside the workspace. A repository whose build is not at
+  # the git root - like this one - needs it.
+  module: ${CI_MODULE:.}
+
+  # Must stay under the 30 minute activity timeout in StoryWorkflowImpl. Startup refuses
+  # otherwise, rather than letting Temporal abandon a build that is still running.
+  timeout-minutes: ${CI_TIMEOUT_MINUTES:25}
+
+  # The gates, applied here rather than by the build, and measured against the diff rather
+  # than the repository. A project-wide rule on a codebase that is mostly stubs fails for
+  # reasons nobody can act on, which is how teams learn to pass -DskipTests.
+  diff-coverage-threshold: ${CI_DIFF_COVERAGE:0.90}
+  mutation-threshold: ${CI_MUTATION:0.70}
+
+pr:
+  # scripted = opens nothing, logs the description it would have written.
+  # github   = opens a real pull request that other people can see.
+  provider: ${PR_PROVIDER:scripted}
+  api-base-url: ${PR_API_BASE_URL:https://api.github.com}
+
+  # owner/name
+  repository: ${PR_REPOSITORY:}
+
+  # A fine-grained token scoped to that one repository, pull-request write only. The only
+  # credential here that can change anything outside this process.
+  token: ${PR_TOKEN:}
+
 qdrant:
   url: ${QDRANT_URL:http://localhost:6333}
   collection: knowledge

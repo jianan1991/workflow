@@ -1,6 +1,10 @@
 package com.loop.orchestrator.activity;
 
 import com.loop.orchestrator.agent.DevAgent;
+import com.loop.orchestrator.delivery.BuildRunner;
+import com.loop.orchestrator.delivery.Diff;
+import com.loop.orchestrator.delivery.PullRequests;
+import com.loop.orchestrator.delivery.SourceControl;
 import com.loop.orchestrator.agent.QaAgent;
 import com.loop.orchestrator.agent.ReviewerAgent;
 import com.loop.orchestrator.domain.Domain.AcceptanceCriterion;
@@ -9,6 +13,7 @@ import com.loop.orchestrator.domain.Domain.CiResult;
 import com.loop.orchestrator.domain.Domain.CriterionVerdict;
 import com.loop.orchestrator.domain.Domain.ImplementResult;
 import com.loop.orchestrator.domain.Domain.Observation;
+import com.loop.orchestrator.domain.Domain.PullRequest;
 import com.loop.orchestrator.domain.Domain.QaOutcome;
 import com.loop.orchestrator.domain.Domain.QaResult;
 import com.loop.orchestrator.domain.Domain.ReviewResult;
@@ -43,11 +48,18 @@ public class AgentBuildActivities implements BuildActivities {
     private final ReviewerAgent reviewer;
     private final QaAgent qa;
     private final DevAgent dev;
+    private final SourceControl scm;
+    private final BuildRunner ci;
+    private final PullRequests pullRequests;
 
-    public AgentBuildActivities(ReviewerAgent reviewer, QaAgent qa, DevAgent dev) {
+    public AgentBuildActivities(ReviewerAgent reviewer, QaAgent qa, DevAgent dev,
+                                SourceControl scm, BuildRunner ci, PullRequests pullRequests) {
         this.reviewer = reviewer;
         this.qa = qa;
         this.dev = dev;
+        this.scm = scm;
+        this.ci = ci;
+        this.pullRequests = pullRequests;
     }
 
     @Override
@@ -79,31 +91,44 @@ public class AgentBuildActivities implements BuildActivities {
                 : ImplementResult.failed(result.failure(), result.costUsd());
     }
 
-    /** Which dev agent is in play, for the startup log and the command centre. */
-    public String devAgentDescription() {
-        return dev.describe();
+    /** What is actually wired, for the startup log and the command centre. */
+    public String describeDelivery() {
+        return "dev: %s | scm: %s | ci: %s | pr: %s".formatted(
+                dev.describe(), scm.describe(), ci.describe(), pullRequests.describe());
     }
 
     @Override
-    public CiResult runCi(Story story, int attempt) {
-        // NOT WIRED. Needs the real build.
-        //
-        // It used to report passed=true, which combined with auto-approval to merge tier 1
-        // stories with no measured coverage and no mutation score at all. notRun() cannot
-        // pass, so the story goes to a person instead - the right answer while the build
-        // does not run.
-        log.warn("[ci] {} attempt {} — CI is not wired, so nothing was measured",
-                story.id(), attempt);
-        return CiResult.notRun("CI not wired — coverage and mutation unmeasured");
+    public CiResult runCi(Story story, String branch, int attempt) {
+        // Scoped to the diff, which is why the branch had to be threaded through: the
+        // numbers worth gating on are coverage of the lines this story added and mutation
+        // of the classes it touched, not the repository's running totals.
+        return ci.run(scm.diffFor(branch), branch, attempt);
     }
 
     @Override
     public ReviewResult review(Story story, List<AcceptanceCriterion> criteria,
-                               Agent author, int attempt) {
-        // The diff is empty because nothing implemented the story. The reviewer is real and
-        // will say so, which is the correct outcome rather than a convenient one.
-        return reviewer.review(story, criteria, author,
-                "(no diff — the dev agent is not wired)", List.of()).review();
+                               Agent author, String branch, int attempt) {
+
+        Diff diff = scm.diffFor(branch);
+
+        if (diff.isEmpty()) {
+            // Say it rather than send the reviewer an empty patch and record its opinion.
+            // A verdict on nothing is not a verdict, and this used to be a hardcoded
+            // string that stayed in place even when a dev agent was dispatching for real.
+            log.warn("[reviewer] {} has no diff to review: {}", story.id(), diff.unified());
+        }
+        if (diff.truncated()) {
+            log.warn("[reviewer] {} diff was truncated — the verdict covers part of the "
+                    + "change only", story.id());
+        }
+
+        return reviewer.review(story, criteria, author, diff.unified(), List.of()).review();
+    }
+
+    @Override
+    public PullRequest openPullRequest(Story story, String branch, CiResult ci,
+                                       ReviewResult review, QaResult qa) {
+        return pullRequests.open(story, branch, scm.diffFor(branch), ci, review, qa);
     }
 
     @Override

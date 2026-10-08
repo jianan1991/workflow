@@ -591,6 +591,7 @@ Append a line whenever exit checks are run. Date, phase, what was run, outcome.
 | 2026-09-22 | 4 | cost reconciliation + end-to-end run | **140 fast + 4 integration green.** Spend now comes from real token usage, summed across dev, reviewer and QA. A run reported $0.0036 per story where it had reported $0.0000 — the tracking was working and `round2` was rounding sub-cent spend away, which reads exactly like cost tracking that was never wired. |
 | 2026-09-22 | 9 | BA criteria threaded through | The reviewer and QA were judging against criteria invented from the story title. Now per story, carried on the child workflow. Gate 1 reports the real testability split: 12 automated, 4 needing a person. |
 | 2026-09-22 | 6, 7, 9 | `./scripts/verify.sh --all` | **112 fast + 4 integration green.** PM, BA, architect, reviewer and QA agents written and tested against a scripted model. Every automated box in those phases is ticked; none of the phases are done, because judging output needs a key and a person. |
+| 2026-10-08 | 5, 8, 9 | the delivery chain: diff — CI — pull request | **209 fast green, and the gate proven against this repository.** A worktree on a real branch, one new method, two runs: untested it measured **diff coverage 0% (0 of 3 changed lines) and mutation 0% (0 of 5 killed)** and failed; with a test for it, **100% (3 of 3) and 80% (4 of 5)** and passed. Same change, same gate. Three things were found only by running it: `.git` is a *file* in a linked worktree, so the repository check rejected a good checkout; PIT re-runs the whole suite and refuses to start unless it is green, so one timing-sensitive Temporal test made the mutation gate unusable until the test scope was narrowed too; and a build failure handed the dev agent "[INFO] ------" as the thing to fix, because the tail of Maven output is its footer. A fourth was found by a unit test: PIT puts `status` in an attribute, not a child element, so every NON_VIABLE mutant was being counted as a real one. |
 | 2026-10-08 | 3, 7, 9 | four more bugs fixed + `mvn test` | **181 fast green.** Three were proved with probes before being touched. QA reported the evidence of whichever criterion came first rather than the one that routed the story, so a dev agent retried on a defect was told to fix the criterion QA could not check, and a story sent to the PM carried an unverifiable note instead of the gap. Two sections with the same heading in one note hashed to one chunk id: 2 chunks in, **1 point in the store**, and the first decision returned **0 hits**. Nothing ever deleted from the index, so a renamed heading left its old text searchable — 1 point before, **2 after** a rewrite. And `POST /epics` was documented as safe to retry while answering a duplicate with a 500. |
 | 2026-10-08 | 4, 8 | four more bugs fixed + `mvn test` | **172 fast green.** The first was the same bug as the session before, one level up: a child story workflow that failed outright threw out of `Promise.allOf` and failed the epic. Proved with a probe before fixing it — the epic ended FAILED, its own status query went on answering BUILDING, and `storyStatuses` held **zero** records even though a sibling in the same layer had already merged. Also: no connect or read timeout on any of the three outbound HTTP clients, which Temporal cannot save because it times out the activity without interrupting the socket read; a data race on the OpenHands output list guarded only by a `join(5s)` that returns whether or not the reader finished; and a dev run killed at the timeout booking as /usr/bin/bash.00 — the most expensive outcome in the system recorded as free. |
 | 2026-10-08 | 4, 5, 8, 9 | four confirmed bugs fixed + `mvn test` + `mvn verify -Pgates` | **165 fast green.** All four were in the join between the workflow and the agent activities, where every component was correct on its own: a thrown dev failure escaped the escalation ladder and failed the sibling stories, question ids came from a counter on an activity instance and reset on restart, auto-approval read an unwired CI as a pass, and the dev agent was handed no acceptance criteria. A fifth fell out of fixing the third: an unmeasured CI result is not a failure to fix, and treating it as one sent every story round the rework loop six times at full price. Project branch coverage 0.69 — 0.73, both short of the 0.90 rule — see the gaps table. |
@@ -607,7 +608,7 @@ Append a line whenever exit checks are run. Date, phase, what was run, outcome.
 | `ArchitectAgentTest` | 13 | Tier and graph parsing, four deadlocking graphs, schedulability |
 | `ReviewerAgentTest` | 11 | Scope creep, self-contradiction, missing booleans and verdicts |
 | `QaAgentTest` | 15 | Routing order, completeness, never seeing the dev agent's tests |
-| `AgentActivitiesTest` | 18 | That the agents are actually reached — asserts on the model being called, not only on values returned. Plus the gate: an unmeasured or zero-mutation CI result cannot auto-approve, and the dev agent is handed the real criteria |
+| `AgentActivitiesTest` | 19 | That the agents are actually reached — asserts on the model being called, not only on values returned. Plus the gate: an unmeasured or zero-mutation CI result cannot auto-approve, and the dev agent is handed the real criteria. Plus: the reviewer is handed the diff the repository actually reports |
 | `ReviewerIndependenceTest` | 12 | Family attribution, uncertainty resolving toward warning |
 | `CostingChatModelTest` | 6 | Pricing per tier, scripted runs priced, unpriced agents not silent |
 | `DevAgentTest` | 17 | Task assembly, the previous-failure correction, workspace and executable guards, usage parsing, and the spend reported by a run that timed out or exited non-zero |
@@ -615,12 +616,15 @@ Append a line whenever exit checks are run. Date, phase, what was run, outcome.
 | `MarkdownChunkerTest` | 6 | Section splitting, frontmatter, stable ids, folding short sections |
 | `RetrievalTest` | 10 | Search accuracy, attribution, re-indexing, repeated headings keeping both sections, a deleted section leaving the index, the attempt cap, failure modes |
 | `EpicWorkflowTest` | 8 | Journey blocking and resume, abandonment, rejected gate, dependency layers, two questions getting distinct epic-scoped ids, a story workflow dying without taking the epic or its siblings with it |
-| `StoryWorkflowTest` | 10 | Auto-approve, the rework loop, the PM route, an unreviewed PR, a broken dev harness blocking rather than crashing, a retryable dev failure reworking, an unmeasured CI going to a person |
+| `StoryWorkflowTest` | 12 | Auto-approve, the rework loop, the PM route, an unreviewed PR, a broken dev harness blocking rather than crashing, a retryable dev failure reworking, an unmeasured CI going to a person, no pull request meaning no auto-merge, a merged story carrying its pull request |
 | `AgentWiringWorkflowTest` | 1 | A whole epic on the **real** activities with no key and no container — the join where every bug so far has lived |
 | `QdrantVectorStoreIT` | 5 | Store parity, payload round trip, upsert replacing, replaceAll removing what is gone, idempotent setup |
 | `LiteLlmChatModelTest` | 2 | A proxy that accepts and never answers fails fast against a real socket, and an unmapped agent is refused before any call |
 | `EpicControllerTest` | 4 | A request that cannot start an epic is refused before Temporal is touched, and a duplicate start reports the conflict |
-| **Fast suite** | **181** | No Docker, no API key, about 20 seconds |
+| `DiffTest` | 7 | Added lines only, numbered on the new side; deletions; several files; what gets mutated |
+| `ReportParsingTest` | 8 | Diff coverage over changed executable lines, mutation scoped to the diff, NON_VIABLE excluded, an unreadable report throwing rather than reporting zero |
+| `PullRequestTest` | 10 | The description a person reads, and the GitHub client against a real loopback HTTP server |
+| **Fast suite** | **209** | No Docker, no API key, about 25 seconds |
 
 Mutation score on `EstimateCalculator`: **92%** against a 70% threshold.
 
@@ -633,8 +637,6 @@ the four that decide whether any of this was worth doing.
 | :-- | :-- |
 | No agent has ever called a real model | every phase from 6 on stays ◐ |
 | The dev agent dispatch has never been executed against a real repository | phase 8; `describe()` says UNVERIFIED |
-| `runCi` is still a stub — it reports `measured = false`, which cannot pass and cannot auto-approve | phase 5, and said plainly in `AgentBuildActivities` |
-| Project branch coverage is **0.73** against the 0.90 rule, so `mvn verify -Pgates` is red | phase 5. The rule is meant to be a diff-coverage check against the merge base, which needs a pipeline that does not exist |
 | The reviewer shares a model family with the author | phase 9, warned at startup |
 | The architect guesses the dependency graph; no code index | phase 7 |
 | Gate 2 never fires — the architect flags structural changes and the workflow ignores it | logged as a warning on every structural epic |
@@ -642,6 +644,11 @@ the four that decide whether any of this was worth doing.
 | No deploy or rollback story | phase 12, still the largest undesigned gap |
 | `replaceAll` on the Qdrant store has never run — the Docker daemon was down, so its IT was SKIPPED | phase 3; the in-memory twin is covered by the fast suite |
 | An existing Qdrant volume holds chunk ids from the old scheme; the first reindex drops the collection, which is the point | phase 3 |
+| `ci.provider=maven` has only run against **this** repository, from a worktree — never against the target repo, which is still unnamed (Q1) | phase 8 |
+| `pr.provider=github` has never reached GitHub. The client is tested against a loopback server, so the request shape is verified and GitHub's response to it is not | phase 8; `describe()` says UNVERIFIED |
+| Nothing merges. The pull request is opened and a person decides; closing it is the next link | phase 11 |
+| Scoping PIT's tests to the changed classes' packages means a test covering them from elsewhere does not count toward the score | phase 5; visible as a low number with its counts, not a wrong one |
+| The project-wide 0.90 branch rule in `-Pgates` is still red at 0.73. The gate that now runs per story is diff-scoped and separate | phase 5 |
 | The review-hours tally has not started | phase 0's stop condition, and it expires once agents run |
 
 **Three bugs in two sessions were found by running the application, not by the suite** — a
