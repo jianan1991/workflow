@@ -294,7 +294,7 @@ loop, escalation, dependency-ordered fan-out.
 
 **Exit checks**
 
-- [x] `mvn test` — `EpicWorkflowTest` (5) and `StoryWorkflowTest` (4) green
+- [x] `mvn test` — `EpicWorkflowTest` (7) and `StoryWorkflowTest` (10) green
 - [x] **The restart check, against a real Temporal server** — run in a stronger order than
       originally written, signalling while nothing was listening:
       1. Epic started; blocked on `Q-101` at journey stage 5
@@ -307,6 +307,13 @@ loop, escalation, dependency-ordered fan-out.
 
 **Stop if:** the resume fails. That is the single assumption the whole architecture rests
 on, and every other component is built on top of it.
+
+**The restart check needs running again.** It passed, and it still missed a bug in the thing
+it was built to prove: question ids came from a counter on an activity instance, so the
+second worker restarted the numbering, and an answer to one question could release a
+different one. The check only ever asked one question. Re-run it with two gaps in the
+journey — `StubPlanningActivities.SECOND_GAP_MARKER` produces them — and confirm the ids
+still read `<epic>-Q1` and `<epic>-Q2` after the worker is replaced.
 
 **Cost reconciliation is now wired.** Every activity reports what its own call consumed and
 the workflow sums — dev, reviewer and QA, not QA alone, which was under-reporting a story by
@@ -584,6 +591,7 @@ Append a line whenever exit checks are run. Date, phase, what was run, outcome.
 | 2026-09-22 | 4 | cost reconciliation + end-to-end run | **140 fast + 4 integration green.** Spend now comes from real token usage, summed across dev, reviewer and QA. A run reported $0.0036 per story where it had reported $0.0000 — the tracking was working and `round2` was rounding sub-cent spend away, which reads exactly like cost tracking that was never wired. |
 | 2026-09-22 | 9 | BA criteria threaded through | The reviewer and QA were judging against criteria invented from the story title. Now per story, carried on the child workflow. Gate 1 reports the real testability split: 12 automated, 4 needing a person. |
 | 2026-09-22 | 6, 7, 9 | `./scripts/verify.sh --all` | **112 fast + 4 integration green.** PM, BA, architect, reviewer and QA agents written and tested against a scripted model. Every automated box in those phases is ticked; none of the phases are done, because judging output needs a key and a person. |
+| 2026-10-08 | 4, 5, 8, 9 | four confirmed bugs fixed + `mvn test` + `mvn verify -Pgates` | **165 fast green.** All four were in the join between the workflow and the agent activities, where every component was correct on its own: a thrown dev failure escaped the escalation ladder and failed the sibling stories, question ids came from a counter on an activity instance and reset on restart, auto-approval read an unwired CI as a pass, and the dev agent was handed no acceptance criteria. A fifth fell out of fixing the third: an unmeasured CI result is not a failure to fix, and treating it as one sent every story round the rework loop six times at full price. Project branch coverage 0.69 — 0.73, both short of the 0.90 rule — see the gaps table. |
 | 2026-09-22 | 1 | `AgentCostModel` + `mvn test` | Unit costs now **derived** from Anthropic list prices x per-agent tokens, with tier→model mapping. Six-story epic: **$12.02**. 49 tests green. Token counts are still estimates — that is what remains before phase 1 closes. |
 
 ---
@@ -597,17 +605,18 @@ Append a line whenever exit checks are run. Date, phase, what was run, outcome.
 | `ArchitectAgentTest` | 13 | Tier and graph parsing, four deadlocking graphs, schedulability |
 | `ReviewerAgentTest` | 11 | Scope creep, self-contradiction, missing booleans and verdicts |
 | `QaAgentTest` | 15 | Routing order, completeness, never seeing the dev agent's tests |
-| `AgentActivitiesTest` | 8 | That the agents are actually reached — asserts on the model being called, not only on values returned |
+| `AgentActivitiesTest` | 15 | That the agents are actually reached — asserts on the model being called, not only on values returned. Plus the gate: an unmeasured or zero-mutation CI result cannot auto-approve, and the dev agent is handed the real criteria |
 | `ReviewerIndependenceTest` | 12 | Family attribution, uncertainty resolving toward warning |
 | `CostingChatModelTest` | 6 | Pricing per tier, scripted runs priced, unpriced agents not silent |
 | `DevAgentTest` | 13 | Task assembly, the previous-failure correction, workspace and executable guards, usage parsing |
 | `EstimateCalculatorTest` | 13 | The worked example, which stages loop, tier cost, designer only with a UI, human minutes, four rejections |
 | `MarkdownChunkerTest` | 6 | Section splitting, frontmatter, stable ids, folding short sections |
 | `RetrievalTest` | 8 | Search accuracy, attribution, re-indexing, the attempt cap, failure modes |
-| `EpicWorkflowTest` | 5 | Journey blocking and resume, abandonment, rejected gate, dependency layers |
-| `StoryWorkflowTest` | 4 | Auto-approve, the rework loop, the PM route, an unreviewed PR |
+| `EpicWorkflowTest` | 7 | Journey blocking and resume, abandonment, rejected gate, dependency layers, two questions getting distinct epic-scoped ids |
+| `StoryWorkflowTest` | 10 | Auto-approve, the rework loop, the PM route, an unreviewed PR, a broken dev harness blocking rather than crashing, a retryable dev failure reworking, an unmeasured CI going to a person |
+| `AgentWiringWorkflowTest` | 1 | A whole epic on the **real** activities with no key and no container — the join where every bug so far has lived |
 | `QdrantVectorStoreIT` | 4 | Store parity, payload round trip, upsert replacing, idempotent setup |
-| **Fast suite** | **153** | No Docker, no API key, about 10 seconds |
+| **Fast suite** | **165** | No Docker, no API key, about 20 seconds |
 
 Mutation score on `EstimateCalculator`: **92%** against a 70% threshold.
 
@@ -620,7 +629,8 @@ the four that decide whether any of this was worth doing.
 | :-- | :-- |
 | No agent has ever called a real model | every phase from 6 on stays ◐ |
 | The dev agent dispatch has never been executed against a real repository | phase 8; `describe()` says UNVERIFIED |
-| `runCi` is still a stub — coverage and mutation are unmeasured | phase 5, and said plainly in `AgentBuildActivities` |
+| `runCi` is still a stub — it reports `measured = false`, which cannot pass and cannot auto-approve | phase 5, and said plainly in `AgentBuildActivities` |
+| Project branch coverage is **0.73** against the 0.90 rule, so `mvn verify -Pgates` is red | phase 5. The rule is meant to be a diff-coverage check against the merge base, which needs a pipeline that does not exist |
 | The reviewer shares a model family with the author | phase 9, warned at startup |
 | The architect guesses the dependency graph; no code index | phase 7 |
 | Gate 2 never fires — the architect flags structural changes and the workflow ignores it | logged as a warning on every structural epic |
@@ -632,3 +642,10 @@ the four that decide whether any of this was worth doing.
 tier name where a model id belonged, a missing Qdrant collection, and a scripted QA that
 reported passes on a run that never happened. Every one had green tests. Treat a green suite
 as necessary and nowhere near sufficient.
+
+**Four more were found by reading the code for the seam between the workflow and the agent
+activities**, which is where all seven have now lived. Each component was right on its own;
+what they handed each other was wrong, and no test looked at the handover.
+`AgentWiringWorkflowTest` exists for exactly that: one epic, the real activities, no stubs,
+no key, no container. It is not a substitute for starting the application, but it is the
+cheapest thing that watches the join.

@@ -93,6 +93,20 @@ public class EpicWorkflowImpl implements EpicWorkflow {
     private final List<StoryStatus> storyStatuses = new ArrayList<>();
     private Estimate estimate;
     private int questionsAsked;
+
+    /**
+     * Question ids are generated here, in workflow state.
+     *
+     * <p>They used to come from a counter on the activity instance, which reset on every
+     * worker restart. Since answers are keyed by id, a reused id meant an answer to an
+     * earlier question already satisfied the await for a later one - the epic resumed on a
+     * reply to a different question and nobody could tell.
+     *
+     * <p>Workflow state is safe for this: it is rebuilt deterministically from history on
+     * replay, so the same epic always generates the same ids in the same order. Scoping the
+     * id to the epic makes a collision between epics impossible too.
+     */
+    private int questionSeq;
     private String note = "";
 
     // ------------------------------------------------------------------- main
@@ -261,7 +275,8 @@ public class EpicWorkflowImpl implements EpicWorkflow {
             }
 
             JourneyStage gap = journey.gaps().getFirst();
-            Question question = planning.raiseQuestion(epic.id(), "pm", gap);
+            String questionId = "%s-Q%d".formatted(epic.id(), ++questionSeq);
+            Question question = planning.raiseQuestion(questionId, epic, "pm", gap);
             openQuestion = question;
             move(Phase.AWAITING_ANSWER, "blocked on " + question.id()
                     + " — stage " + gap.index() + " (" + gap.name() + ")");

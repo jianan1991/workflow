@@ -173,7 +173,35 @@ public final class Domain {
      */
     public enum Agent {MID, SENIOR}
 
-    public record CiResult(boolean passed, double diffCoverage, double mutationScore, String note) {
+    /**
+     * @param measured whether the build actually ran and produced these numbers. Stated
+     *                 explicitly and with no convenient default, because the alternative is
+     *                 what bug 3 was: a stub returning {@code passed=true} with zeroed
+     *                 coverage, and auto-approval trusting it. Each half was honest; together
+     *                 they merged work with no quality gate at all.
+     */
+    public record CiResult(boolean measured, boolean passed, double diffCoverage,
+                           double mutationScore, String note) {
+
+        /** Nothing ran. Cannot pass, because there is nothing to have passed. */
+        public static CiResult notRun(String why) {
+            return new CiResult(false, false, 0.0, 0.0, why);
+        }
+
+        /**
+         * Whether this result carries enough to approve a merge on with nobody watching.
+         *
+         * <p>Two separate claims, and conflating them is how a story merged unchecked:
+         * {@code measured} says a build ran at all, {@code passed} says what it concluded.
+         * An unmeasured result is not a lenient pass, it is no information.
+         *
+         * <p>A zero mutation score on a result that claims to have been measured is the
+         * second case. Mutation is the gate an agent cannot talk its way past, so zero
+         * means the reporting is broken rather than that the code is perfect.
+         */
+        public boolean trustworthy() {
+            return measured && mutationScore > 0.0;
+        }
     }
 
     /**
@@ -243,7 +271,33 @@ public final class Domain {
      * an activity is the only thing that knows what its own call consumed — and a workflow
      * summing values it was handed is replay-safe, while one reading a running total is not.
      */
-    public record ImplementResult(String branch, double costUsd) {
+    /**
+     * @param retryable whether another attempt could plausibly succeed. An agent that tried
+     *                  and fell short is retryable - escalating it to a stronger model is
+     *                  exactly the right move. A missing workspace or an executable that is
+     *                  not installed is not: no model fixes a directory that does not exist,
+     *                  and burning four escalation rounds to discover that wastes money and
+     *                  hides the real problem.
+     */
+    public record ImplementResult(boolean succeeded,
+                                  String branch,
+                                  double costUsd,
+                                  String failure,
+                                  boolean retryable) {
+
+        public static ImplementResult built(String branch, double costUsd) {
+            return new ImplementResult(true, branch, costUsd, null, true);
+        }
+
+        /** The agent tried and fell short. Another attempt, or a stronger agent, may do it. */
+        public static ImplementResult failed(String failure, double costUsd) {
+            return new ImplementResult(false, "", costUsd, failure, true);
+        }
+
+        /** The harness could not run at all. A person has to fix this, not another attempt. */
+        public static ImplementResult broken(String failure) {
+            return new ImplementResult(false, "", 0.0, failure, false);
+        }
     }
 
     public record StoryStatus(String storyId,

@@ -24,10 +24,18 @@ public interface BuildActivities {
      * against the repository with the story, its acceptance criteria, and the symbols the
      * code index says are involved.
      *
-     * @param attempt 1-based. The agent is told what failed last time, so attempt 2 is not
-     *                a blind retry.
+     * @param criteria what "done" means. Without these the agent builds from the story
+     *                 title while the reviewer and QA judge it against the real criteria -
+     *                 grading it on a specification it never saw, which guarantees rework
+     *                 and a correction message that cannot explain itself.
+     * @param attempt  1-based. The agent is told what failed last time, so attempt 2 is not
+     *                 a blind retry.
      */
-    ImplementResult implement(Story story, Agent agent, int attempt, String previousFailure);
+    ImplementResult implement(Story story,
+                              List<AcceptanceCriterion> criteria,
+                              Agent agent,
+                              int attempt,
+                              String previousFailure);
 
     /**
      * Run the build. An agent cannot open a pull request until this passes.

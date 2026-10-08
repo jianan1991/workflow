@@ -2,6 +2,7 @@ package com.loop.orchestrator.activity;
 
 import com.loop.orchestrator.agent.ArchitectAgent;
 import com.loop.orchestrator.agent.BaAgent;
+import com.loop.orchestrator.agent.DevAgent;
 import com.loop.orchestrator.agent.ScriptedDevAgent;
 import com.loop.orchestrator.agent.PmAgent;
 import com.loop.orchestrator.agent.QaAgent;
@@ -9,6 +10,7 @@ import com.loop.orchestrator.agent.ReviewerAgent;
 import com.loop.orchestrator.cost.AgentCostModel;
 import com.loop.orchestrator.domain.Domain.AcceptanceCriterion;
 import com.loop.orchestrator.domain.Domain.Agent;
+import com.loop.orchestrator.domain.Domain.CiResult;
 import com.loop.orchestrator.domain.Domain.Coverage;
 import com.loop.orchestrator.domain.Domain.Epic;
 import com.loop.orchestrator.domain.Domain.Journey;
@@ -16,6 +18,7 @@ import com.loop.orchestrator.domain.Domain.JourneyStage;
 import com.loop.orchestrator.domain.Domain.QaOutcome;
 import com.loop.orchestrator.domain.Domain.Question;
 import com.loop.orchestrator.domain.Domain.QaResult;
+import com.loop.orchestrator.domain.Domain.ReviewResult;
 import com.loop.orchestrator.domain.Domain.Story;
 import com.loop.orchestrator.domain.Domain.Testability;
 import com.loop.orchestrator.knowledge.HashingEmbedder;
@@ -82,6 +85,43 @@ class AgentActivitiesTest {
         }
     }
 
+    /**
+     * A dev agent that remembers what it was asked to build, and can be told to fail.
+     *
+     * <p>The scripted agent cannot answer either question these tests ask: whether the
+     * acceptance criteria actually arrived, and what a failure turns into on the way back
+     * out. Both were wrong, and both looked fine from the outside.
+     */
+    private static final class RecordingDevAgent implements DevAgent {
+        private final Result canned;
+        private List<AcceptanceCriterion> criteriaSeen;
+
+        private RecordingDevAgent(Result canned) {
+            this.canned = canned;
+        }
+
+        static RecordingDevAgent succeeding() {
+            return new RecordingDevAgent(
+                    new Result(true, "built", "feat/x", 0.42, 0, 0, null));
+        }
+
+        static RecordingDevAgent failing(String failure) {
+            return new RecordingDevAgent(Result.failed(failure));
+        }
+
+        @Override
+        public Result implement(Story story, List<AcceptanceCriterion> criteria,
+                                Agent agent, int attempt, String previousFailure) {
+            this.criteriaSeen = criteria;
+            return canned;
+        }
+
+        @Override
+        public String describe() {
+            return "recording dev agent";
+        }
+    }
+
     @BeforeEach
     void setUp() throws IOException {
         Files.writeString(knowledgeBase.resolve("throttling-policy.md"), """
@@ -112,9 +152,12 @@ class AgentActivitiesTest {
     }
 
     private AgentBuildActivities build() {
+        return build(new ScriptedDevAgent());
+    }
+
+    private AgentBuildActivities build(DevAgent dev) {
         return new AgentBuildActivities(
-                new ReviewerAgent(model, 4096), new QaAgent(model, 4096),
-                new ScriptedDevAgent());
+                new ReviewerAgent(model, 4096), new QaAgent(model, 4096), dev);
     }
 
     @Nested
@@ -152,7 +195,15 @@ class AgentActivitiesTest {
             JourneyStage gap = new JourneyStage(5, "Ask for more",
                     "They want a higher ceiling. By which route?", Coverage.GAP);
 
-            Question question = planning().raiseQuestion(EPIC.id(), PmAgent.NAME, gap);
+            Question question = planning()
+                    .raiseQuestion("LOOP-14-Q7", EPIC, PmAgent.NAME, gap);
+
+            assertThat(question.id())
+                    .as("the id must be the one the workflow generated. It used to come "
+                            + "from a counter on this activity instance, which reset on "
+                            + "every worker restart, and since answers are keyed by id a "
+                            + "reused id let a reply to one question release a different one")
+                    .isEqualTo("LOOP-14-Q7");
 
             assertThat(question.text()).isNotBlank();
             assertThat(question.searchesAttempted())
@@ -221,6 +272,94 @@ class AgentActivitiesTest {
             assertThat(result.outcome())
                     .as("unverifiable does not fail a story; it becomes a person's checklist")
                     .isEqualTo(QaOutcome.PASS);
+        }
+
+        @Test
+        @DisplayName("the dev agent is handed the same criteria the reviewer and QA judge against")
+        void devAgentGetsTheCriteria() {
+            RecordingDevAgent dev = RecordingDevAgent.succeeding();
+
+            build(dev).implement(STORY, CRITERIA, Agent.SENIOR, 1, null);
+
+            assertThat(dev.criteriaSeen)
+                    .as("it used to be handed an empty list and built from the story title "
+                            + "alone, while the reviewer and QA marked the work against the "
+                            + "real criteria — the agent was being graded on a brief it "
+                            + "never saw")
+                    .isEqualTo(CRITERIA);
+        }
+
+        @Test
+        @DisplayName("a dev failure comes back as a result, not an exception")
+        void devFailureIsReturnedNotThrown() {
+            var result = build(RecordingDevAgent.failing("the harness exited 1"))
+                    .implement(STORY, CRITERIA, Agent.SENIOR, 1, null);
+
+            assertThat(result.succeeded()).isFalse();
+            assertThat(result.retryable())
+                    .as("an ordinary failure belongs in the rework loop. Thrown, it went "
+                            + "past the escalation ladder and took the sibling stories with it")
+                    .isTrue();
+            assertThat(result.failure()).contains("exited 1");
+        }
+
+        @Test
+        @DisplayName("a broken harness is not retryable, because no stronger model fixes it")
+        void brokenHarnessIsNotRetryable() {
+            var result = build(RecordingDevAgent.failing("the workspace does not exist"))
+                    .implement(STORY, CRITERIA, Agent.MID, 1, null);
+
+            assertThat(result.succeeded()).isFalse();
+            assertThat(result.retryable()).isFalse();
+        }
+
+        @Test
+        @DisplayName("an unwired CI reports that it measured nothing, rather than a pass")
+        void unwiredCiDoesNotReportAPass() {
+            CiResult ci = build().runCi(STORY, 1);
+
+            assertThat(ci.measured()).isFalse();
+            assertThat(ci.passed())
+                    .as("it used to return passed=true with zero coverage and zero mutation")
+                    .isFalse();
+            assertThat(ci.trustworthy()).isFalse();
+        }
+
+        @Test
+        @DisplayName("auto-approval refuses a CI result that measured nothing")
+        void unmeasuredCiCannotAutoApprove() {
+            Story tierOne = new Story("LOOP-14-1", "Tenant config lookup", 1, List.of());
+            ReviewResult clean = new ReviewResult(true, false, "matches the criteria");
+
+            assertThat(build().mayAutoApprove(tierOne, clean, CiResult.notRun("not wired")))
+                    .as("merging with nobody watching on the strength of a build that never "
+                            + "ran is the worst failure this pipeline can have")
+                    .isFalse();
+        }
+
+        @Test
+        @DisplayName("auto-approval refuses a pass whose mutation score came back as zero")
+        void zeroMutationCannotAutoApprove() {
+            Story tierOne = new Story("LOOP-14-1", "Tenant config lookup", 1, List.of());
+            ReviewResult clean = new ReviewResult(true, false, "matches the criteria");
+            CiResult suspicious = new CiResult(true, true, 0.95, 0.0, "reported a pass");
+
+            assertThat(build().mayAutoApprove(tierOne, clean, suspicious))
+                    .as("a zero on the gate an agent cannot game means the reporting is "
+                            + "broken, not that the code is perfect")
+                    .isFalse();
+        }
+
+        @Test
+        @DisplayName("auto-approval allows a tier 1 story whose CI really did measure a pass")
+        void measuredPassAutoApprovesTierOne() {
+            Story tierOne = new Story("LOOP-14-1", "Tenant config lookup", 1, List.of());
+            ReviewResult clean = new ReviewResult(true, false, "matches the criteria");
+            CiResult measured = new CiResult(true, true, 0.92, 0.74, "coverage 92%, mutation 74%");
+
+            assertThat(build().mayAutoApprove(tierOne, clean, measured))
+                    .as("the guards must not have closed the auto-approval path altogether")
+                    .isTrue();
         }
 
         @Test

@@ -102,18 +102,43 @@ public class StoryWorkflowImpl implements StoryWorkflow {
             state = StoryState.IMPLEMENTING;
             // Every activity reports what it spent, and the workflow sums. A running total
             // read from somewhere central would not survive a replay.
-            ImplementResult implemented = build.implement(story, agent, devAttempts,
+            ImplementResult implemented = build.implement(story, criteria, agent, devAttempts,
                     previousFailure);
             costUsd += implemented.costUsd();
 
+            if (!implemented.succeeded()) {
+                if (!implemented.retryable()) {
+                    // The harness itself is broken. No model fixes a missing workspace, and
+                    // escalating through MID to SENIOR to discover that costs four rounds
+                    // and buries the message a person actually needs to read.
+                    return block("the dev agent could not run: " + implemented.failure());
+                }
+                previousFailure = implemented.failure();
+                if (!absorbFailure(previousFailure)) {
+                    return status();
+                }
+                continue;
+            }
+
             state = StoryState.CI;
             CiResult ci = build.runCi(story, devAttempts);
-            if (!ci.passed()) {
+
+            // Three outcomes, not two. A build that ran and failed is the agent's problem
+            // and goes back round. A build that did not run is nobody's problem to fix by
+            // writing more code - reworking it buys six identical attempts at full price
+            // and ends in the same place. It carries on to review and QA, both of which
+            // are real, and gate 3 refuses to auto-approve on an unmeasured result, so a
+            // person decides instead.
+            if (ci.measured() && !ci.passed()) {
                 previousFailure = ci.note();
                 if (!absorbFailure(previousFailure)) {
                     return status();
                 }
                 continue;
+            }
+            if (!ci.measured()) {
+                log.warn("story {} has no CI verdict ({}) - a person decides this one",
+                        story.id(), ci.note());
             }
 
             state = StoryState.REVIEW;

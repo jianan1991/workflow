@@ -25,7 +25,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Stub agents. No model is called and nothing is written anywhere.
@@ -46,14 +45,19 @@ public class StubPlanningActivities implements PlanningActivities {
 
     private static final Logger log = LoggerFactory.getLogger(StubPlanningActivities.class);
 
-    private final AtomicInteger questionSeq = new AtomicInteger();
-
     /**
      * Unit costs come from cost-model.properties, the same file the phase 1 worksheet
      * reads. Carrying a second copy here would guarantee the two drift apart, and the
      * estimate quoted at gate 1 would stop matching the one anybody priced by hand.
      */
     private final AgentCostModel costs;
+
+    /**
+     * Opt-in marker for an epic whose journey has two gaps rather than one, so a test can
+     * drive two rounds of questions. Opt-in because every other test wants the
+     * one-question path and would otherwise have to answer twice.
+     */
+    public static final String SECOND_GAP_MARKER = "[two-gaps]";
 
     public StubPlanningActivities(@Value("${cost.model-file:../cost-model.properties}") String file) {
         Properties properties = new Properties();
@@ -74,6 +78,12 @@ public class StubPlanningActivities implements PlanningActivities {
         // block-and-resume path end to end.
         Coverage stage5 = answers.isEmpty() ? Coverage.GAP : Coverage.KNOWN;
 
+        // A second gap, only for an epic that asked for one. It needs two answers, which
+        // is what makes a second question — and so a second question id — happen.
+        Coverage stage4 = epic.body().contains(SECOND_GAP_MARKER) && answers.size() < 2
+                ? Coverage.GAP
+                : Coverage.PARTIAL;
+
         return new Journey(List.of(
                 new JourneyStage(1, "Integrate",
                         "A developer wires up the API with a key they generated themselves.",
@@ -86,7 +96,7 @@ public class StubPlanningActivities implements PlanningActivities {
                         Coverage.PARTIAL),
                 new JourneyStage(4, "Blocked",
                         "Requests start returning 429. What the body carries is half answered.",
-                        Coverage.PARTIAL),
+                        stage4),
                 new JourneyStage(5, "Ask for more",
                         "They want a higher ceiling. By which route, and who grants it?",
                         stage5),
@@ -96,12 +106,12 @@ public class StubPlanningActivities implements PlanningActivities {
     }
 
     @Override
-    public Question raiseQuestion(String epicId, String askedBy, JourneyStage gap) {
-        String id = "Q-" + (100 + questionSeq.incrementAndGet());
-        log.info("[{}] blocked on {} — stage {} is a gap", askedBy, epicId, gap.index());
+    public Question raiseQuestion(String questionId, Epic epic, String askedBy,
+                                  JourneyStage gap) {
+        log.info("[{}] blocked on {} — stage {} is a gap", askedBy, epic.id(), gap.index());
 
         return new Question(
-                id,
+                questionId,
                 askedBy,
                 "Who grants a higher limit, and how quickly? If the answer is self-serve, "
                         + "this epic gains an admin surface and roughly doubles.",

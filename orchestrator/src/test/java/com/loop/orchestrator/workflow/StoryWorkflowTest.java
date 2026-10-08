@@ -155,6 +155,70 @@ class StoryWorkflowTest {
                 .isZero();
     }
 
+    @Test
+    @DisplayName("a dev agent that cannot run blocks the story instead of killing the workflow")
+    void brokenDevAgentBlocksTheStory() {
+        Story story = new Story("LOOP-14-8",
+                StubBuildActivities.DEV_BROKEN_MARKER + " Redis-backed limiter", 2, List.of());
+
+        StoryStatus result = runToCompletion(story, true);
+
+        assertThat(result.state())
+                .as("the failure used to be thrown, which escaped the escalation ladder "
+                        + "entirely and failed the parent epic along with every sibling story")
+                .isEqualTo(StoryState.BLOCKED);
+        assertThat(result.note()).contains("the dev agent could not run");
+        assertThat(result.devAttempts())
+                .as("no stronger model fixes a missing workspace, so spending four more "
+                        + "rounds to discover that is waste")
+                .isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("an ordinary dev failure goes through the rework loop and the story still lands")
+    void retryableDevFailureReworks() {
+        Story story = new Story("LOOP-14-7",
+                StubBuildActivities.DEV_FAILS_ONCE_MARKER + " Tenant config lookup", 1, List.of());
+
+        StoryStatus result = runToCompletion(story, true);
+
+        assertThat(result.state()).isEqualTo(StoryState.MERGED);
+        assertThat(result.devAttempts())
+                .as("the first attempt failed and the second was told why")
+                .isEqualTo(2);
+        assertThat(result.agent())
+                .as("one failure does not reassign the story — that takes two")
+                .isEqualTo(Agent.MID);
+        assertThat(result.costUsd())
+                .as("the failed attempt still spent tokens, and they are still charged")
+                .isGreaterThan(0.42);
+    }
+
+    @Test
+    @DisplayName("a story whose CI measured nothing goes to a person, not round the loop")
+    void unmeasuredCiRoutesToAPerson() {
+        Story story = new Story("LOOP-14-6",
+                StubBuildActivities.CI_UNMEASURED_MARKER + " Tenant config lookup", 1, List.of());
+
+        StoryWorkflow workflow = start(story, false);
+        StoryStatus waiting = await(workflow, s -> s.state() == StoryState.AWAITING_PR_REVIEW);
+
+        assertThat(waiting.devAttempts())
+                .as("no amount of rework measures a build that does not run, so paying for "
+                        + "six attempts to find that out is pure waste")
+                .isEqualTo(1);
+        assertThat(waiting.autoApproved())
+                .as("an unmeasured result is not a lenient pass")
+                .isFalse();
+
+        workflow.decidePullRequest(
+                new GateDecision(Gate.PULL_REQUEST, true, "read the diff by hand"));
+
+        StoryStatus merged = WorkflowStub.fromTyped(workflow).getResult(StoryStatus.class);
+        assertThat(merged.state()).isEqualTo(StoryState.MERGED);
+        assertThat(merged.autoApproved()).isFalse();
+    }
+
     // ------------------------------------------------------------------ setup
 
     private StoryWorkflow start(Story story, boolean useTimeskipping) {

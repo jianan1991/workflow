@@ -14,14 +14,11 @@ import com.loop.orchestrator.domain.Domain.JourneyStage;
 import com.loop.orchestrator.domain.Domain.Phase;
 import com.loop.orchestrator.domain.Domain.Question;
 import com.loop.orchestrator.domain.Domain.Story;
-import com.loop.orchestrator.domain.Domain.TestabilitySplit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * The planning half of the pipeline, driven by real agents.
@@ -45,13 +42,6 @@ public class AgentPlanningActivities implements PlanningActivities {
     private final ArchitectAgent architect;
     private final AgentCostModel costs;
 
-    /**
-     * Question ids only need to be unique and stable within a run. They are generated in
-     * an activity rather than a workflow because a counter is state, and workflow code is
-     * replayed.
-     */
-    private final AtomicInteger questionSeq = new AtomicInteger(100);
-
     public AgentPlanningActivities(PmAgent pm, BaAgent ba, ArchitectAgent architect,
                                    AgentCostModel costs) {
         this.pm = pm;
@@ -66,12 +56,13 @@ public class AgentPlanningActivities implements PlanningActivities {
     }
 
     @Override
-    public Question raiseQuestion(String epicId, String askedBy, JourneyStage gap) {
-        // The epic is reconstructed thinly here because the workflow only passes an id.
-        // Worth fixing when the board is real: the agent writes a better question with the
-        // epic body in front of it, and right now it is writing without one.
-        Epic epic = new Epic(epicId, "", "");
-        return pm.raiseQuestion("Q-" + questionSeq.incrementAndGet(), epic, gap);
+    public Question raiseQuestion(String questionId, Epic epic, String askedBy,
+                                  JourneyStage gap) {
+        // The id comes from the workflow. It used to come from a counter on this instance,
+        // which reset whenever the worker restarted - and since the workflow keys answers
+        // by id, a reused id let an answer to one question satisfy a different one and
+        // release the epic on a reply to something else.
+        return pm.raiseQuestion(questionId, epic, gap);
     }
 
     @Override

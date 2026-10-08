@@ -49,22 +49,32 @@ public class AgentBuildActivities implements BuildActivities {
     }
 
     @Override
-    public ImplementResult implement(Story story, Agent agent, int attempt,
-                                     String previousFailure) {
-        // Criteria are not on this signature yet — the workflow passes them to review and
-        // QA but not here. Until they are, the dev agent is told what to build by title
-        // alone, which is thin. Threading them through is the next thing.
-        DevAgent.Result result = dev.implement(story, List.of(), agent, attempt, previousFailure);
+    public ImplementResult implement(Story story, List<AcceptanceCriterion> criteria,
+                                     Agent agent, int attempt, String previousFailure) {
 
-        if (!result.succeeded()) {
-            // A harness failure is not a code defect. Letting it through as a successful
-            // implementation would send an empty change to CI and blame the reviewer for
-            // not liking it.
-            throw new IllegalStateException(("dev agent failed on %s attempt %d: %s")
-                    .formatted(story.id(), attempt, result.failure()));
+        DevAgent.Result result = dev.implement(story, criteria, agent, attempt, previousFailure);
+
+        if (result.succeeded()) {
+            return ImplementResult.built(result.branch(), result.costUsd());
         }
 
-        return new ImplementResult(result.branch(), result.costUsd());
+        // A failure is returned, not thrown. Throwing propagated past the workflow's
+        // escalation ladder entirely - MID never got promoted to SENIOR, the story never
+        // reached a person as blocked, and the epic's Promise.allOf took its siblings down
+        // with it. A business outcome belongs in the return value.
+        log.warn("[{}] {} attempt {} failed: {}",
+                agent.name().toLowerCase(), story.id(), attempt, result.failure());
+
+        // Nothing a stronger model fixes. A missing workspace or an uninstalled executable
+        // needs a person, and spending four escalation rounds to discover that wastes money
+        // and buries the real message.
+        boolean harnessBroken = result.failure() != null
+                && (result.failure().contains("could not start")
+                || result.failure().contains("does not exist"));
+
+        return harnessBroken
+                ? ImplementResult.broken(result.failure())
+                : ImplementResult.failed(result.failure(), result.costUsd());
     }
 
     /** Which dev agent is in play, for the startup log and the command centre. */
@@ -74,12 +84,15 @@ public class AgentBuildActivities implements BuildActivities {
 
     @Override
     public CiResult runCi(Story story, int attempt) {
-        // NOT WIRED. Needs the real build. Reporting a pass here would be the worst kind of
-        // stub: the mutation gate is the one check an agent cannot talk its way past, and
-        // faking it removes the only thing protecting the codebase.
-        log.warn("[ci] {} attempt {} — CI is not wired; this is not a real result",
+        // NOT WIRED. Needs the real build.
+        //
+        // It used to report passed=true, which combined with auto-approval to merge tier 1
+        // stories with no measured coverage and no mutation score at all. notRun() cannot
+        // pass, so the story goes to a person instead - the right answer while the build
+        // does not run.
+        log.warn("[ci] {} attempt {} — CI is not wired, so nothing was measured",
                 story.id(), attempt);
-        return new CiResult(true, 0.0, 0.0, "CI not wired — coverage and mutation unmeasured");
+        return CiResult.notRun("CI not wired — coverage and mutation unmeasured");
     }
 
     @Override
@@ -111,6 +124,17 @@ public class AgentBuildActivities implements BuildActivities {
 
     @Override
     public boolean mayAutoApprove(Story story, ReviewResult review, CiResult ci) {
+        // Before anything else: did CI give us anything to approve on? Auto-approval is
+        // the one decision in this pipeline that happens with nobody watching, so it is
+        // also the one that must not read silence as consent.
+        if (!ci.trustworthy()) {
+            log.warn("[gate3] {} auto-approve: no — {}", story.id(), ci.measured()
+                    ? "mutation came back as zero, so the build reported a pass it cannot "
+                            + "have earned"
+                    : "CI measured nothing: " + ci.note());
+            return false;
+        }
+
         boolean ok = story.tier() == 1
                 && ci.passed()
                 && review.matchesCriteria()

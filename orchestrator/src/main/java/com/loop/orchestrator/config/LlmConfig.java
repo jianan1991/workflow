@@ -146,6 +146,16 @@ public class LlmConfig {
              "unmetCriteria":[],"outOfScopeFiles":["application.yml"]}
             """;
 
+    /**
+     * The demo script, exposed so a test can run the real activities against the same
+     * model the application uses when no key is configured. A second copy in the test tree
+     * would drift from this one, and the test would then prove the wiring against a script
+     * nothing actually runs.
+     */
+    public static ScriptedChatModel scriptedModel() {
+        return scripted();
+    }
+
     private static ScriptedChatModel scripted() {
         Map<String, java.util.function.Function<ChatModel.ChatRequest, String>> script =
                 new LinkedHashMap<>();

@@ -33,6 +33,12 @@ class EpicWorkflowTest {
             new Epic("LOOP-14", "Per-tenant API rate limiting",
                     "Developers on the Starter plan can exhaust the API.");
 
+    /** Two journey gaps, so the epic asks two questions and two ids get generated. */
+    private static final Epic TWO_GAPS =
+            new Epic("LOOP-15", "Per-tenant API rate limiting",
+                    "Developers on the Starter plan can exhaust the API. "
+                            + StubPlanningActivities.SECOND_GAP_MARKER);
+
     private TestWorkflowEnvironment env;
 
     @AfterEach
@@ -185,9 +191,52 @@ class EpicWorkflowTest {
         assertThat(finished.note()).contains("split story 3 first");
     }
 
+    @Test
+    @DisplayName("two questions in one epic get distinct ids, and an answer only settles its own")
+    void questionIdsDoNotCollide() {
+        // Time skipping off for the same reason as the resume test: the point is the wait.
+        EpicWorkflow workflow = start(TWO_GAPS, false);
+
+        EpicStatus first = awaitStatus(workflow, s -> s.phase() == Phase.AWAITING_ANSWER);
+        String firstId = first.openQuestion().id();
+        assertThat(firstId)
+                .as("ids are generated in workflow state and scoped to the epic, so they "
+                        + "are rebuilt identically on replay rather than restarting from a "
+                        + "counter living on the activity instance")
+                .isEqualTo(TWO_GAPS.id() + "-Q1");
+
+        workflow.answerQuestion(new Answer(firstId, "Support grants it within a day."));
+
+        EpicStatus second = awaitStatus(workflow,
+                s -> s.phase() == Phase.AWAITING_ANSWER
+                        && !s.openQuestion().id().equals(firstId));
+        String secondId = second.openQuestion().id();
+        assertThat(secondId).isEqualTo(TWO_GAPS.id() + "-Q2");
+
+        // The bug, exactly: the second question reused the first id, so the answer already
+        // in the map satisfied the await immediately and the epic carried on as though
+        // someone had answered a question nobody had been asked.
+        workflow.answerQuestion(new Answer(firstId, "Answering the first one again."));
+
+        EpicStatus unmoved = workflow.status();
+        assertThat(unmoved.phase())
+                .as("an answer to one question must not release a different one")
+                .isEqualTo(Phase.AWAITING_ANSWER);
+        assertThat(unmoved.openQuestion().id()).isEqualTo(secondId);
+
+        workflow.answerQuestion(new Answer(secondId, "The body carries Retry-After."));
+
+        EpicStatus moved = awaitStatus(workflow, s -> s.phase() != Phase.AWAITING_ANSWER);
+        assertThat(moved.questionsAsked()).isEqualTo(2);
+    }
+
     // ------------------------------------------------------------------ setup
 
     private EpicWorkflow start(boolean useTimeskipping) {
+        return start(EPIC, useTimeskipping);
+    }
+
+    private EpicWorkflow start(Epic epic, boolean useTimeskipping) {
         env = TestWorkflowEnvironment.newInstance(
                 TestEnvironmentOptions.newBuilder()
                         .setUseTimeskipping(useTimeskipping)
@@ -204,13 +253,13 @@ class EpicWorkflowTest {
                 EpicWorkflow.class,
                 WorkflowOptions.newBuilder()
                         .setTaskQueue(EpicWorkflow.TASK_QUEUE)
-                        .setWorkflowId(EPIC.id())
+                        .setWorkflowId(epic.id())
                         // Must outlast the human-answer timeout, or a skipped clock ends
                         // the execution before the workflow gets to give up on its own.
                         .setWorkflowExecutionTimeout(Duration.ofDays(30))
                         .build());
 
-        WorkflowClient.start(workflow::run, EPIC);
+        WorkflowClient.start(workflow::run, epic);
         return workflow;
     }
 

@@ -40,15 +40,43 @@ public class StubBuildActivities implements BuildActivities {
      */
     public static final String CRITERION_GAP_MARKER = "[criteria-gap]";
 
+    /**
+     * The harness itself cannot run — no workspace, no executable. Not something a
+     * stronger model fixes, so it must reach a person directly rather than burning four
+     * escalation rounds to find that out.
+     */
+    public static final String DEV_BROKEN_MARKER = "[dev-broken]";
+
+    /**
+     * The dev agent ran and failed once. An ordinary failure: it belongs in the rework
+     * loop, and the next attempt is told what went wrong.
+     */
+    public static final String DEV_FAILS_ONCE_MARKER = "[dev-fails-once]";
+
+    /**
+     * CI is not wired for this story, which is the truth about the running system today.
+     * It is not a failure and not a pass — it is an absence of information.
+     */
+    public static final String CI_UNMEASURED_MARKER = "[ci-unmeasured]";
+
     @Override
-    public ImplementResult implement(Story story, Agent agent, int attempt,
-                                     String previousFailure) {
+    public ImplementResult implement(Story story, List<AcceptanceCriterion> criteria,
+                                     Agent agent, int attempt, String previousFailure) {
         log.info("[{}] {} attempt {}{}", agent.name().toLowerCase(), story.id(), attempt,
                 previousFailure == null ? "" : " — fixing: " + previousFailure);
+        if (story.title().startsWith(DEV_BROKEN_MARKER)) {
+            return ImplementResult.broken("the workspace directory does not exist");
+        }
+        if (story.title().startsWith(DEV_FAILS_ONCE_MARKER) && attempt == 1) {
+            // Costed. A failed attempt still spent tokens, and a rework loop reporting
+            // zero would make the cost measurement a fiction.
+            return ImplementResult.failed("the harness exited 1 before writing anything", 0.07);
+        }
+
         // A plausible figure, because a stub reporting zero would make the cost arithmetic
         // in the workflow untestable.
         double cost = agent == Agent.SENIOR ? 1.85 : 0.42;
-        return new ImplementResult("branch feat/" + story.id().toLowerCase() + " · 4 files", cost);
+        return ImplementResult.built("branch feat/" + story.id().toLowerCase() + " · 4 files", cost);
     }
 
     @Override
@@ -56,11 +84,17 @@ public class StubBuildActivities implements BuildActivities {
         // Mutation score is the real gate. A first-attempt tier 2 story lands just under
         // it — the tests ran and asserted too little, which is exactly what a coverage-only
         // gate would have waved through.
+        if (story.title().startsWith(CI_UNMEASURED_MARKER)) {
+            return CiResult.notRun("CI not wired - coverage and mutation unmeasured");
+        }
+
         boolean thin = story.tier() == 2 && attempt == 1;
 
+        // Measured either way - this stub stands in for a build that ran, which is what
+        // makes the auto-approval path testable at all.
         CiResult result = thin
-                ? new CiResult(false, 0.93, 0.61, "mutation score 61% is below the 70% gate")
-                : new CiResult(true, 0.92, 0.74, "diff coverage 92%, mutation 74%");
+                ? new CiResult(true, false, 0.93, 0.61, "mutation score 61% is below the 70% gate")
+                : new CiResult(true, true, 0.92, 0.74, "diff coverage 92%, mutation 74%");
 
         log.info("[ci] {} attempt {} -> {}", story.id(), attempt, result.note());
         return result;
@@ -108,6 +142,7 @@ public class StubBuildActivities implements BuildActivities {
     @Override
     public boolean mayAutoApprove(Story story, ReviewResult review, CiResult ci) {
         boolean ok = story.tier() == 1
+                && ci.trustworthy()
                 && ci.passed()
                 && review.matchesCriteria()
                 && !review.scopeExceeded();
