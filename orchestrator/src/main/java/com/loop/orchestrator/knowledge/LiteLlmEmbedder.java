@@ -2,7 +2,10 @@ package com.loop.orchestrator.knowledge;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.http.MediaType;
+import com.loop.orchestrator.support.TimeoutRestClient;
 import org.springframework.web.client.RestClient;
+
+import java.time.Duration;
 
 import java.util.Map;
 
@@ -21,10 +24,10 @@ public class LiteLlmEmbedder implements Embedder {
     private final int dimensions;
 
     public LiteLlmEmbedder(String baseUrl, String apiKey, String model, int dimensions) {
-        this.http = RestClient.builder()
-                .baseUrl(baseUrl)
-                .defaultHeader("Authorization", "Bearer " + apiKey)
-                .build();
+        // Embedding a chunk is a short call. If it has not answered in a minute, something
+        // is wrong, and waiting forever on it parks the thread that was indexing.
+        this.http = TimeoutRestClient.createWithBearer(baseUrl, apiKey,
+                Duration.ofSeconds(10), Duration.ofSeconds(60));
         this.model = model;
         this.dimensions = dimensions;
     }

@@ -156,6 +156,61 @@ class DevAgentTest {
         }
 
         @Test
+        @DisplayName("a run killed at the timeout reports what it spent, rather than booking as free")
+        void timedOutRunStillReportsSpend() {
+            DevAgent.Result result = OpenHandsDevAgent.summarise(STORY, true, true, -1,
+                    List.of("{\"accumulated_cost\":1.82,\"prompt_tokens\":390000,"
+                            + "\"completion_tokens\":28000}"),
+                    Duration.ofMinutes(20));
+
+            assertThat(result.succeeded()).isFalse();
+            assertThat(result.failure()).contains("timed out after 20 minutes");
+            assertThat(result.costUsd())
+                    .as("a run killed at the timeout is the most expensive outcome there "
+                            + "is — the whole budget and no branch — and it used to book as $0")
+                    .isEqualTo(1.82);
+            assertThat(result.inputTokens()).isEqualTo(390000);
+        }
+
+        @Test
+        @DisplayName("a failing exit code carries its spend too")
+        void failedRunStillReportsSpend() {
+            DevAgent.Result result = OpenHandsDevAgent.summarise(STORY, false, true, 1,
+                    List.of("{\"accumulated_cost\":0.44}", "fatal: not a git repository"),
+                    Duration.ofMinutes(20));
+
+            assertThat(result.succeeded()).isFalse();
+            assertThat(result.failure()).contains("exited 1", "not a git repository");
+            assertThat(result.costUsd()).isEqualTo(0.44);
+        }
+
+        @Test
+        @DisplayName("output still arriving when it was read is admitted, not presented as a total")
+        void partialOutputIsAdmitted() {
+            DevAgent.Result result = OpenHandsDevAgent.summarise(STORY, true, false, -1,
+                    List.of("{\"accumulated_cost\":0.91}"), Duration.ofMinutes(20));
+
+            assertThat(result.failure())
+                    .as("the reader thread can still be going: join(timeout) returns either "
+                            + "way, and reading a list that is still being appended to was "
+                            + "a ConcurrentModificationException waiting to happen")
+                    .contains("floor, not a total");
+            assertThat(result.costUsd()).isEqualTo(0.91);
+        }
+
+        @Test
+        @DisplayName("a clean run names the branch it produced")
+        void cleanRunNamesTheBranch() {
+            DevAgent.Result result = OpenHandsDevAgent.summarise(STORY, false, true, 0,
+                    List.of("{\"accumulated_cost\":0.76,\"prompt_tokens\":120000}"),
+                    Duration.ofMinutes(20));
+
+            assertThat(result.succeeded()).isTrue();
+            assertThat(result.branch()).isEqualTo("feat/" + STORY.id().toLowerCase());
+            assertThat(result.failure()).isNull();
+        }
+
+        @Test
         @DisplayName("a stream with no usage reports zero, having said so — zero is not the same as free")
         void missingUsageIsZeroNotInvented() {
             OpenHandsDevAgent.Usage usage = OpenHandsDevAgent.readUsage(List.of(

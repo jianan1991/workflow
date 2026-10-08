@@ -294,7 +294,7 @@ loop, escalation, dependency-ordered fan-out.
 
 **Exit checks**
 
-- [x] `mvn test` — `EpicWorkflowTest` (7) and `StoryWorkflowTest` (10) green
+- [x] `mvn test` — `EpicWorkflowTest` (8) and `StoryWorkflowTest` (10) green
 - [x] **The restart check, against a real Temporal server** — run in a stronger order than
       originally written, signalling while nothing was listening:
       1. Epic started; blocked on `Q-101` at journey stage 5
@@ -591,6 +591,7 @@ Append a line whenever exit checks are run. Date, phase, what was run, outcome.
 | 2026-09-22 | 4 | cost reconciliation + end-to-end run | **140 fast + 4 integration green.** Spend now comes from real token usage, summed across dev, reviewer and QA. A run reported $0.0036 per story where it had reported $0.0000 — the tracking was working and `round2` was rounding sub-cent spend away, which reads exactly like cost tracking that was never wired. |
 | 2026-09-22 | 9 | BA criteria threaded through | The reviewer and QA were judging against criteria invented from the story title. Now per story, carried on the child workflow. Gate 1 reports the real testability split: 12 automated, 4 needing a person. |
 | 2026-09-22 | 6, 7, 9 | `./scripts/verify.sh --all` | **112 fast + 4 integration green.** PM, BA, architect, reviewer and QA agents written and tested against a scripted model. Every automated box in those phases is ticked; none of the phases are done, because judging output needs a key and a person. |
+| 2026-10-08 | 4, 8 | four more bugs fixed + `mvn test` | **172 fast green.** The first was the same bug as the session before, one level up: a child story workflow that failed outright threw out of `Promise.allOf` and failed the epic. Proved with a probe before fixing it — the epic ended FAILED, its own status query went on answering BUILDING, and `storyStatuses` held **zero** records even though a sibling in the same layer had already merged. Also: no connect or read timeout on any of the three outbound HTTP clients, which Temporal cannot save because it times out the activity without interrupting the socket read; a data race on the OpenHands output list guarded only by a `join(5s)` that returns whether or not the reader finished; and a dev run killed at the timeout booking as /usr/bin/bash.00 — the most expensive outcome in the system recorded as free. |
 | 2026-10-08 | 4, 5, 8, 9 | four confirmed bugs fixed + `mvn test` + `mvn verify -Pgates` | **165 fast green.** All four were in the join between the workflow and the agent activities, where every component was correct on its own: a thrown dev failure escaped the escalation ladder and failed the sibling stories, question ids came from a counter on an activity instance and reset on restart, auto-approval read an unwired CI as a pass, and the dev agent was handed no acceptance criteria. A fifth fell out of fixing the third: an unmeasured CI result is not a failure to fix, and treating it as one sent every story round the rework loop six times at full price. Project branch coverage 0.69 — 0.73, both short of the 0.90 rule — see the gaps table. |
 | 2026-09-22 | 1 | `AgentCostModel` + `mvn test` | Unit costs now **derived** from Anthropic list prices x per-agent tokens, with tier→model mapping. Six-story epic: **$12.02**. 49 tests green. Token counts are still estimates — that is what remains before phase 1 closes. |
 
@@ -608,15 +609,16 @@ Append a line whenever exit checks are run. Date, phase, what was run, outcome.
 | `AgentActivitiesTest` | 15 | That the agents are actually reached — asserts on the model being called, not only on values returned. Plus the gate: an unmeasured or zero-mutation CI result cannot auto-approve, and the dev agent is handed the real criteria |
 | `ReviewerIndependenceTest` | 12 | Family attribution, uncertainty resolving toward warning |
 | `CostingChatModelTest` | 6 | Pricing per tier, scripted runs priced, unpriced agents not silent |
-| `DevAgentTest` | 13 | Task assembly, the previous-failure correction, workspace and executable guards, usage parsing |
+| `DevAgentTest` | 17 | Task assembly, the previous-failure correction, workspace and executable guards, usage parsing, and the spend reported by a run that timed out or exited non-zero |
 | `EstimateCalculatorTest` | 13 | The worked example, which stages loop, tier cost, designer only with a UI, human minutes, four rejections |
 | `MarkdownChunkerTest` | 6 | Section splitting, frontmatter, stable ids, folding short sections |
 | `RetrievalTest` | 8 | Search accuracy, attribution, re-indexing, the attempt cap, failure modes |
-| `EpicWorkflowTest` | 7 | Journey blocking and resume, abandonment, rejected gate, dependency layers, two questions getting distinct epic-scoped ids |
+| `EpicWorkflowTest` | 8 | Journey blocking and resume, abandonment, rejected gate, dependency layers, two questions getting distinct epic-scoped ids, a story workflow dying without taking the epic or its siblings with it |
 | `StoryWorkflowTest` | 10 | Auto-approve, the rework loop, the PM route, an unreviewed PR, a broken dev harness blocking rather than crashing, a retryable dev failure reworking, an unmeasured CI going to a person |
 | `AgentWiringWorkflowTest` | 1 | A whole epic on the **real** activities with no key and no container — the join where every bug so far has lived |
 | `QdrantVectorStoreIT` | 4 | Store parity, payload round trip, upsert replacing, idempotent setup |
-| **Fast suite** | **165** | No Docker, no API key, about 20 seconds |
+| `LiteLlmChatModelTest` | 2 | A proxy that accepts and never answers fails fast against a real socket, and an unmapped agent is refused before any call |
+| **Fast suite** | **172** | No Docker, no API key, about 20 seconds |
 
 Mutation score on `EstimateCalculator`: **92%** against a 70% threshold.
 
@@ -643,9 +645,12 @@ tier name where a model id belonged, a missing Qdrant collection, and a scripted
 reported passes on a run that never happened. Every one had green tests. Treat a green suite
 as necessary and nowhere near sufficient.
 
-**Four more were found by reading the code for the seam between the workflow and the agent
-activities**, which is where all seven have now lived. Each component was right on its own;
-what they handed each other was wrong, and no test looked at the handover.
+**Eight more were found by reading the code rather than by running it.** Four were in the
+seam between the workflow and the agent activities; the next four were the same seam one
+level up, plus the transport underneath it — a failing child workflow, missing HTTP
+timeouts, an unsynchronised cross-thread read, and spend thrown away on the most expensive
+path there is. In every case each component was right on its own; what they handed each
+other, or what they did when something failed, was not, and no test looked there.
 `AgentWiringWorkflowTest` exists for exactly that: one epic, the real activities, no stubs,
 no key, no container. It is not a substitute for starting the application, but it is the
 cheapest thing that watches the join.

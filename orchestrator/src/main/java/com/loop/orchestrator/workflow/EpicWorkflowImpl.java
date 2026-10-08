@@ -2,6 +2,7 @@ package com.loop.orchestrator.workflow;
 
 import com.loop.orchestrator.activity.PlanningActivities;
 import com.loop.orchestrator.domain.Domain.AcceptanceCriterion;
+import com.loop.orchestrator.domain.Domain.Agent;
 import com.loop.orchestrator.domain.Domain.Answer;
 import com.loop.orchestrator.domain.Domain.Epic;
 import com.loop.orchestrator.domain.Domain.EpicStatus;
@@ -195,8 +196,19 @@ public class EpicWorkflowImpl implements EpicWorkflow {
                         ChildWorkflowOptions.newBuilder()
                                 .setWorkflowId(StoryWorkflow.workflowId(epicId, story.id()))
                                 .build());
+                // handle(), not a bare get() later. A child that fails outright — an
+                // unusable model reply, or a 429 the activity retries ran out on — used
+                // to throw out of Promise.allOf and fail this epic. Two things were lost
+                // with it: the stories that had already merged in the same layer were
+                // never recorded, because storyStatuses is filled on the line after the
+                // get(); and the epic's own status query went on answering BUILDING for a
+                // workflow that was dead, so nothing escalated to a person. A story whose
+                // workflow died is a blocked story, which this epic already knows how to
+                // handle.
                 running.add(Async.function(child::run, epicId, story,
-                        criteria.getOrDefault(story.id(), List.of())));
+                                criteria.getOrDefault(story.id(), List.of()))
+                        .handle((status, failure) ->
+                                failure == null ? status : crashed(story, failure)));
             }
 
             Promise.allOf(running).get();
@@ -220,6 +232,38 @@ public class EpicWorkflowImpl implements EpicWorkflow {
 
         move(Phase.MERGED, "%d stories merged, %d rework loop(s) with no human in them, $%.2f against a $%.2f estimate"
                 .formatted(storyStatuses.size(), rework, actual, estimate.dollars()));
+    }
+
+    /**
+     * A story whose workflow died rather than reaching a verdict.
+     *
+     * <p>Reported as BLOCKED, which routes it to a person through the path that already
+     * exists. The spend is reported as zero and said to be zero: the child's running total
+     * died with it, and claiming a figure we do not have would be worse than admitting the
+     * gap.
+     */
+    private static StoryStatus crashed(Story story, RuntimeException failure) {
+        return new StoryStatus(
+                story.id(), story.tier(),
+                story.tier() == 1 ? Agent.MID : Agent.SENIOR,
+                StoryState.BLOCKED, 0, 0, 0, false, 0.0,
+                "the story workflow failed outright: " + rootMessage(failure)
+                        + " — whatever it spent before it died is not in this figure");
+    }
+
+    /**
+     * The deepest message in the chain. A ChildWorkflowFailure wrapping an
+     * ActivityFailure wrapping the real cause reads as nothing at the top level.
+     */
+    private static String rootMessage(Throwable failure) {
+        Throwable deepest = failure;
+        while (deepest.getCause() != null) {
+            deepest = deepest.getCause();
+        }
+        String message = deepest.getMessage();
+        return message == null || message.isBlank()
+                ? deepest.getClass().getSimpleName()
+                : message;
     }
 
     /**

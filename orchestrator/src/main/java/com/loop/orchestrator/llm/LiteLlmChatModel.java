@@ -4,9 +4,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
+import com.loop.orchestrator.support.TimeoutRestClient;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -22,17 +25,33 @@ public class LiteLlmChatModel implements ChatModel {
 
     private static final Logger log = LoggerFactory.getLogger(LiteLlmChatModel.class);
 
+    /** A proxy that has not accepted the connection by now is not going to. */
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+
+    /**
+     * Long enough for a 400k-token call to a strong model, short enough to stay well under
+     * the activity's start-to-close timeout (10 minutes for planning, 30 for build) so a
+     * stalled call fails and retries rather than parking a worker thread for good.
+     */
+    private static final Duration READ_TIMEOUT = Duration.ofMinutes(5);
+
     private final RestClient http;
     private final Map<String, String> agentToTier;
     private final String baseUrl;
+    private final Duration readTimeout;
 
     public LiteLlmChatModel(String baseUrl, String apiKey, Map<String, String> agentToTier) {
+        this(baseUrl, apiKey, agentToTier, CONNECT_TIMEOUT, READ_TIMEOUT);
+    }
+
+    /** Timeouts given explicitly, so a test can prove a hanging proxy fails fast. */
+    public LiteLlmChatModel(String baseUrl, String apiKey, Map<String, String> agentToTier,
+                            Duration connectTimeout, Duration readTimeout) {
         this.baseUrl = baseUrl;
         this.agentToTier = Map.copyOf(agentToTier);
-        this.http = RestClient.builder()
-                .baseUrl(baseUrl)
-                .defaultHeader("Authorization", "Bearer " + apiKey)
-                .build();
+        this.readTimeout = readTimeout;
+        this.http = TimeoutRestClient.createWithBearer(
+                baseUrl, apiKey, connectTimeout, readTimeout);
     }
 
     @Override
@@ -61,6 +80,13 @@ public class LiteLlmChatModel implements ChatModel {
             throw new IllegalStateException(("model call for '%s' (tier %s) failed with %d via "
                     + "%s: %s").formatted(request.agent(), tier, e.getStatusCode().value(),
                     baseUrl, e.getResponseBodyAsString()), e);
+        } catch (ResourceAccessException e) {
+            // Distinct from an HTTP error on purpose. "No reply at all" and "the proxy said
+            // 429" lead a person to different places, and this message is what ends up in
+            // the blocked story's note.
+            throw new IllegalStateException(("model call for '%s' (tier %s) got no reply from "
+                    + "%s within %ds: %s").formatted(request.agent(), tier, baseUrl,
+                    readTimeout.toSeconds(), e.getMessage()), e);
         }
 
         if (response == null || response.path("choices").isEmpty()) {

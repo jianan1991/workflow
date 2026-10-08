@@ -6,8 +6,11 @@ import com.loop.orchestrator.knowledge.Knowledge.Hit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
+import com.loop.orchestrator.support.TimeoutRestClient;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
+
+import java.time.Duration;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -28,7 +31,15 @@ public class QdrantVectorStore implements VectorStore {
     private final String collection;
 
     public QdrantVectorStore(String baseUrl, String collection) {
-        this.http = RestClient.builder().baseUrl(baseUrl).build();
+        // A container on the same Docker network: anything slower than this is a failure
+        // rather than slowness, and an unbounded wait here stalls knowledge retrieval
+        // inside an agent call instead of failing it.
+        //
+        // The read budget is larger than a local service suggests because upsert() sends
+        // every chunk of the knowledge base in one request, and the JDK client treats this
+        // as a whole-request deadline rather than an idle timeout.
+        this.http = TimeoutRestClient.create(baseUrl,
+                Duration.ofSeconds(5), Duration.ofSeconds(60));
         this.collection = collection;
     }
 

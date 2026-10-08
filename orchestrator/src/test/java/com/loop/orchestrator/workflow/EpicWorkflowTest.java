@@ -1,7 +1,11 @@
 package com.loop.orchestrator.workflow;
 
+import com.loop.orchestrator.activity.BuildActivities;
 import com.loop.orchestrator.activity.StubBuildActivities;
 import com.loop.orchestrator.activity.StubPlanningActivities;
+import com.loop.orchestrator.domain.Domain.AcceptanceCriterion;
+import com.loop.orchestrator.domain.Domain.Agent;
+import com.loop.orchestrator.domain.Domain.ReviewResult;
 import com.loop.orchestrator.domain.Domain.Answer;
 import com.loop.orchestrator.domain.Domain.Epic;
 import com.loop.orchestrator.domain.Domain.EpicStatus;
@@ -40,6 +44,23 @@ class EpicWorkflowTest {
                             + StubPlanningActivities.SECOND_GAP_MARKER);
 
     private TestWorkflowEnvironment env;
+
+    /**
+     * Build activities where the reviewer blows up on one story, the way an unusable model
+     * reply or a 429 the retries ran out on does. Public and static because Temporal
+     * instantiates nothing here, but the registry still reflects over the class.
+     */
+    public static class ReviewerExplodesOnStoryTwo extends StubBuildActivities {
+        @Override
+        public ReviewResult review(Story story, List<AcceptanceCriterion> criteria,
+                                   Agent author, int attempt) {
+            if (story.id().endsWith("-2")) {
+                throw new IllegalStateException(
+                        "model call for 'reviewer' failed with 429 via litellm");
+            }
+            return super.review(story, criteria, author, attempt);
+        }
+    }
 
     @AfterEach
     void tearDown() {
@@ -230,6 +251,48 @@ class EpicWorkflowTest {
         assertThat(moved.questionsAsked()).isEqualTo(2);
     }
 
+    @Test
+    @DisplayName("a story workflow that dies outright does not take the epic or its siblings with it")
+    void aCrashedStoryDoesNotKillTheEpic() {
+        EpicWorkflow workflow = start(EPIC, true, new ReviewerExplodesOnStoryTwo());
+        WorkflowStub stub = WorkflowStub.fromTyped(workflow);
+
+        EpicStatus blocked = awaitStatus(workflow, s -> s.phase() == Phase.AWAITING_ANSWER);
+        workflow.answerQuestion(new Answer(blocked.openQuestion().id(), "Support grants it."));
+        awaitStatus(workflow, s -> s.phase() == Phase.EPIC_REVIEW);
+        workflow.decideGate(new GateDecision(Gate.EPIC_PLAN, true, "go"));
+
+        // The epic must finish. It used to fail outright: Promise.allOf rethrew the child's
+        // failure, the epic execution ended FAILED, and its own status query went on
+        // answering BUILDING for a workflow that was dead.
+        EpicStatus finished = stub.getResult(EpicStatus.class);
+
+        assertThat(finished.phase())
+                .as("a story needing a person abandons the epic deliberately, which is not "
+                        + "the same as the epic crashing")
+                .isEqualTo(Phase.ABANDONED);
+
+        StoryStatus crashed = finished.storyStatuses().stream()
+                .filter(s -> s.storyId().endsWith("-2"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("the crashed story was not recorded"));
+
+        assertThat(crashed.state()).isEqualTo(StoryState.BLOCKED);
+        assertThat(crashed.note()).contains("failed outright", "429");
+        assertThat(crashed.note())
+                .as("its spend died with it, and a figure we do not have must not be "
+                        + "presented as one we do")
+                .contains("not in this figure");
+
+        assertThat(finished.storyStatuses())
+                .as("the sibling that merged in the same layer is the thing that was being "
+                        + "lost: storyStatuses is filled on the line after the get()")
+                .anySatisfy(sibling -> {
+                    assertThat(sibling.storyId()).endsWith("-1");
+                    assertThat(sibling.state()).isEqualTo(StoryState.MERGED);
+                });
+    }
+
     // ------------------------------------------------------------------ setup
 
     private EpicWorkflow start(boolean useTimeskipping) {
@@ -237,6 +300,10 @@ class EpicWorkflowTest {
     }
 
     private EpicWorkflow start(Epic epic, boolean useTimeskipping) {
+        return start(epic, useTimeskipping, new StubBuildActivities());
+    }
+
+    private EpicWorkflow start(Epic epic, boolean useTimeskipping, BuildActivities build) {
         env = TestWorkflowEnvironment.newInstance(
                 TestEnvironmentOptions.newBuilder()
                         .setUseTimeskipping(useTimeskipping)
@@ -245,7 +312,7 @@ class EpicWorkflowTest {
         Worker worker = env.newWorker(EpicWorkflow.TASK_QUEUE);
         worker.registerWorkflowImplementationTypes(EpicWorkflowImpl.class, StoryWorkflowImpl.class);
         worker.registerActivitiesImplementations(
-                new StubPlanningActivities("../cost-model.properties"), new StubBuildActivities());
+                new StubPlanningActivities("../cost-model.properties"), build);
         env.start();
 
         WorkflowClient client = env.getWorkflowClient();

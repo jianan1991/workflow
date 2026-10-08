@@ -15,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -37,6 +38,12 @@ public class OpenHandsDevAgent implements DevAgent {
 
     private static final Logger log = LoggerFactory.getLogger(OpenHandsDevAgent.class);
     private static final ObjectMapper JSON = new ObjectMapper();
+
+    /**
+     * How long to wait for the output reader after the process is done. If it is still
+     * going after this the output is read anyway, and the result says it is incomplete.
+     */
+    private static final Duration DRAIN_GRACE = Duration.ofSeconds(5);
 
     private final String executable;
     private final Path workspace;
@@ -101,48 +108,97 @@ public class OpenHandsDevAgent implements DevAgent {
                     + " — is OpenHands installed and on PATH?");
         }
 
-        List<String> events = new ArrayList<>();
-        try {
-            // Drained on a separate thread: a process whose output nobody reads fills its
-            // pipe buffer and blocks forever, which looks exactly like a hung agent.
-            Thread drain = new Thread(() -> {
-                try (var reader = process.inputReader(StandardCharsets.UTF_8)) {
-                    reader.lines().forEach(events::add);
-                } catch (IOException e) {
-                    log.warn("stopped reading agent output early", e);
-                }
-            });
-            drain.setDaemon(true);
-            drain.start();
+        // Appended by the drain thread, read by this one, so it has to be synchronized.
+        // A plain ArrayList here was a data race with no guard at all: join(timeout)
+        // returns whether or not the thread has finished, and iterating a list that is
+        // still being appended to throws ConcurrentModificationException — out of
+        // implement(), past the escalation ladder, and into the parent epic.
+        List<String> events = Collections.synchronizedList(new ArrayList<>());
 
-            if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
-                process.destroyForcibly();
-                return Result.failed("timed out after " + timeout.toMinutes()
-                        + " minutes — the harness was killed, and anything it half-wrote is "
-                        + "still in the workspace");
+        // Drained on a separate thread: a process whose output nobody reads fills its
+        // pipe buffer and blocks forever, which looks exactly like a hung agent.
+        Thread drain = new Thread(() -> {
+            try (var reader = process.inputReader(StandardCharsets.UTF_8)) {
+                reader.lines().forEach(events::add);
+            } catch (IOException e) {
+                log.warn("stopped reading agent output early", e);
             }
-            drain.join(TimeUnit.SECONDS.toMillis(5));
+        });
+        drain.setDaemon(true);
+        drain.start();
 
+        boolean timedOut;
+        try {
+            timedOut = !process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            if (timedOut) {
+                // Killing it closes the pipe, which ends the drain thread — so the
+                // output it did read, and the spend recorded in it, survives to be
+                // reported below instead of being thrown away with the process.
+                process.destroyForcibly();
+            }
+            drain.join(DRAIN_GRACE.toMillis());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             process.destroyForcibly();
             return Result.failed("interrupted while waiting for the agent");
         }
 
-        int exit = process.exitValue();
-        Usage usage = readUsage(events);
-
-        if (exit != 0) {
-            return new Result(false, "", "", usage.costUsd(), usage.inputTokens(),
-                    usage.outputTokens(),
-                    "exited " + exit + ": " + tail(events));
+        boolean fullyDrained = !drain.isAlive();
+        List<String> output;
+        synchronized (events) {
+            output = List.copyOf(events);
         }
 
-        log.info("[{}] {} attempt {} — finished, {} event(s), {} in / {} out tokens",
-                agent.name().toLowerCase(), story.id(), attempt, events.size(),
-                usage.inputTokens(), usage.outputTokens());
+        // Not exitValue() on the timeout path: the process was only just destroyed and may
+        // not have been reaped, which throws IllegalThreadStateException.
+        int exit = timedOut ? -1 : process.exitValue();
 
-        return new Result(true, tail(events),
+        Result result = summarise(story, timedOut, fullyDrained, exit, output, timeout);
+
+        log.info("[{}] {} attempt {} — {}, {} event(s), {} in / {} out tokens, ${}",
+                agent.name().toLowerCase(), story.id(), attempt,
+                result.succeeded() ? "finished" : "failed",
+                output.size(), result.inputTokens(), result.outputTokens(), result.costUsd());
+
+        return result;
+    }
+
+    /**
+     * Turn what the process did into a result, including what it spent.
+     *
+     * <p>Separated out because the expensive case is the one that was wrong and the one a
+     * subprocess test cannot reach reliably: a run killed at the timeout returned
+     * {@code Result.failed(...)}, which zeroes the cost. That books the single most
+     * expensive outcome in the system: the whole budget spent and no branch produced,
+     * booked as free, which is the same failure as cost tracking that was never wired.
+     */
+    static Result summarise(Story story, boolean timedOut, boolean fullyDrained, int exitCode,
+                            List<String> output, Duration timeout) {
+
+        Usage usage = readUsage(output);
+
+        // Said plainly rather than left to be inferred from a short event list. A spend
+        // figure read off a stream that was still arriving is a floor, not a total.
+        String partial = fullyDrained
+                ? ""
+                : " (the agent's output was still arriving when it was read, so the token "
+                        + "counts and spend below are a floor, not a total)";
+
+        if (timedOut) {
+            return new Result(false, tail(output), "",
+                    usage.costUsd(), usage.inputTokens(), usage.outputTokens(),
+                    "timed out after " + timeout.toMinutes() + " minutes — the harness was "
+                            + "killed, and anything it half-wrote is still in the workspace"
+                            + partial);
+        }
+
+        if (exitCode != 0) {
+            return new Result(false, tail(output), "",
+                    usage.costUsd(), usage.inputTokens(), usage.outputTokens(),
+                    "exited " + exitCode + ": " + tail(output) + partial);
+        }
+
+        return new Result(true, tail(output),
                 "feat/" + story.id().toLowerCase(),
                 usage.costUsd(), usage.inputTokens(), usage.outputTokens(), null);
     }
