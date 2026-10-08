@@ -117,6 +117,81 @@ class RetrievalTest {
                 .isEqualTo(first);
     }
 
+    @Test
+    @DisplayName("a note with the same heading twice keeps both sections, rather than losing one")
+    void repeatedHeadingsBothSurvive() throws IOException {
+        Files.writeString(knowledgeBase.resolve("decisions.md"), """
+                ---
+                date: 2026-10-08
+                author: jianan
+                ---
+
+                ## Decision
+
+                Rate limits key on the tenant identifier rather than the api key, because
+                several keys belonging to one tenant have to draw from a single bucket.
+
+                ## Decision
+
+                The Starter plan ceiling is one hundred requests per minute, and raising it
+                is a support action rather than a self-serve one.
+                """);
+
+        indexer.indexDirectory(knowledgeBase);
+
+        // The first section is the one that used to disappear: both chunks hashed to the
+        // same id from file plus heading, so the second overwrote it in the store and the
+        // decision was simply not in the index any more.
+        assertThat(indexer.search("tenant identifier single bucket", 5))
+                .as("an agent that cannot find an answered decision asks a person a "
+                        + "question the knowledge base already answered")
+                .isNotEmpty();
+        assertThat(indexer.search("Starter plan ceiling support action", 5)).isNotEmpty();
+    }
+
+    @Test
+    @DisplayName("a section deleted from a note leaves the index, rather than being cited forever")
+    void deletedSectionsLeaveTheIndex() throws IOException {
+        Files.writeString(knowledgeBase.resolve("reversed.md"), """
+                ---
+                date: 2026-09-01
+                author: jianan
+                ---
+
+                ## Fail open
+
+                When Redis is unavailable the limiter lets every request through, which was
+                agreed deliberately in September as the lesser of the two risks.
+                """);
+
+        indexer.indexDirectory(knowledgeBase);
+        assertThat(indexer.search("Redis unavailable lets every request through", 5))
+                .isNotEmpty();
+
+        // Reversed in October. The note is rewritten, and the old decision must stop being
+        // retrievable - it used to stay in the store forever, dated and attributed, with
+        // nothing to suggest an agent should not cite it.
+        Files.writeString(knowledgeBase.resolve("reversed.md"), """
+                ---
+                date: 2026-10-08
+                author: jianan
+                ---
+
+                ## Fail closed
+
+                When Redis is unavailable the limiter rejects every request, reversing the
+                September decision after the incident showed what fail-open costs.
+                """);
+        indexer.indexDirectory(knowledgeBase);
+
+        assertThat(indexer.search("agreed deliberately in September lesser of the two risks", 5))
+                .as("citing a decision that was reversed is worse than finding nothing, "
+                        + "because it comes with a date and an author on it")
+                .isEmpty();
+        assertThat(indexer.search("rejects every request reversing the September decision", 5))
+                .isNotEmpty();
+    }
+
     @Nested
     @DisplayName("the attempt cap")
     class AttemptCap {

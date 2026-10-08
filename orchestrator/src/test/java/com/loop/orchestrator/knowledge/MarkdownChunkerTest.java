@@ -76,9 +76,12 @@ class MarkdownChunkerTest {
     @Test
     @DisplayName("the chunk id is stable across runs, so an edit updates rather than duplicates")
     void idsAreStable() {
-        assertThat(MarkdownChunker.idFor("policy.md", "Algorithm"))
-                .isEqualTo(MarkdownChunker.idFor("policy.md", "Algorithm"))
-                .isNotEqualTo(MarkdownChunker.idFor("policy.md", "Ceilings"));
+        assertThat(MarkdownChunker.idFor("policy.md", "Algorithm", 0))
+                .isEqualTo(MarkdownChunker.idFor("policy.md", "Algorithm", 0))
+                .isNotEqualTo(MarkdownChunker.idFor("policy.md", "Ceilings", 0))
+                .as("a repeated heading used to produce one id for both sections, and the "
+                        + "second silently overwrote the first in every store")
+                .isNotEqualTo(MarkdownChunker.idFor("policy.md", "Algorithm", 1));
     }
 
     @Test

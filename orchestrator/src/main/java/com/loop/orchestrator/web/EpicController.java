@@ -8,6 +8,7 @@ import com.loop.orchestrator.domain.Domain.StoryStatus;
 import com.loop.orchestrator.workflow.EpicWorkflow;
 import com.loop.orchestrator.workflow.StoryWorkflow;
 import io.temporal.client.WorkflowClient;
+import io.temporal.client.WorkflowExecutionAlreadyStarted;
 import io.temporal.client.WorkflowNotFoundException;
 import io.temporal.client.WorkflowOptions;
 import org.slf4j.Logger;
@@ -41,9 +42,22 @@ public class EpicController {
         this.client = client;
     }
 
-    /** Start an epic. The workflow id is the epic id, so this is safe to retry. */
+    /**
+     * Start an epic.
+     *
+     * <p>The workflow id is the epic id, so a retry cannot start a second run of the same
+     * epic. It used to be described as safe to retry and was not: the duplicate came back
+     * as an uncaught WorkflowExecutionAlreadyStarted, which Spring turns into a 500. A
+     * retry now gets a 409 naming the epic that is already running, and a request with no
+     * usable id gets a 400 instead of a 500 from inside Temporal.
+     */
     @PostMapping
     public ResponseEntity<Map<String, String>> create(@RequestBody Epic epic) {
+        String rejection = unusable(epic);
+        if (rejection != null) {
+            return ResponseEntity.badRequest().body(Map.of("error", rejection));
+        }
+
         EpicWorkflow workflow = client.newWorkflowStub(
                 EpicWorkflow.class,
                 WorkflowOptions.newBuilder()
@@ -51,12 +65,43 @@ public class EpicController {
                         .setWorkflowId(epic.id())
                         .build());
 
-        WorkflowClient.start(workflow::run, epic);
+        try {
+            WorkflowClient.start(workflow::run, epic);
+        } catch (WorkflowExecutionAlreadyStarted e) {
+            log.info("epic {} is already running — not starting a second one", epic.id());
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                    "epicId", epic.id(),
+                    "error", "this epic is already running; GET /epics/" + epic.id()
+                            + " for its state"));
+        }
+
         log.info("started epic {}", epic.id());
 
         return ResponseEntity.accepted().body(Map.of(
                 "epicId", epic.id(),
                 "watch", "http://localhost:8080/namespaces/default/workflows/" + epic.id()));
+    }
+
+    /**
+     * @return why this epic cannot be started, or null if it can
+     */
+    private static String unusable(Epic epic) {
+        if (epic == null || epic.id() == null || epic.id().isBlank()) {
+            return "an epic needs an id — it becomes the workflow id, so the run cannot be "
+                    + "addressed without one";
+        }
+        if (epic.id().chars().anyMatch(Character::isWhitespace)) {
+            return "an epic id cannot contain whitespace: '" + epic.id() + "'";
+        }
+        if (epic.id().contains("/")) {
+            // StoryWorkflow.workflowId composes epicId + "/" + storyId, so a slash here
+            // could produce a story id that collides with another epic's.
+            return "an epic id cannot contain '/': story workflow ids are built from it";
+        }
+        if (epic.title() == null || epic.title().isBlank()) {
+            return "an epic needs a title — the PM agent maps a journey from it";
+        }
+        return null;
     }
 
     /** Live state, read straight off the running workflow. */

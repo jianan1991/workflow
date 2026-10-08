@@ -40,6 +40,14 @@ public class InMemoryVectorStore implements VectorStore {
     }
 
     @Override
+    public void replaceAll(int dimensions, List<Chunk> toAdd, List<float[]> toAddVectors) {
+        chunks.clear();
+        vectors.clear();
+        ensureCollection(dimensions);
+        upsert(toAdd, toAddVectors);
+    }
+
+    @Override
     public List<Hit> search(float[] query, int limit) {
         List<Hit> hits = new ArrayList<>(chunks.size());
         vectors.forEach((id, vector) -> {

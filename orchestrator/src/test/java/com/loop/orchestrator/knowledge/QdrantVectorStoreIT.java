@@ -109,6 +109,25 @@ class QdrantVectorStoreIT {
     }
 
     @Test
+    @DisplayName("replaceAll leaves the store holding exactly what was passed, and nothing older")
+    void replaceAllRemovesWhatIsGone() {
+        Chunk only = chunk("throttling-policy.md", "Fail closed",
+                "When Redis is unavailable the limiter rejects every request, reversing "
+                        + "the September decision.");
+
+        qdrant.replaceAll(EMBEDDER.dimensions(), List.of(only),
+                List.of(EMBEDDER.embed(only.embeddable())));
+
+        assertThat(qdrant.count())
+                .as("upsert alone could never remove a renamed heading or a deleted "
+                        + "section, so an agent went on citing decisions that were reversed")
+                .isEqualTo(1);
+        assertThat(qdrant.search(EMBEDDER.embed("70 percent mutation score threshold"), 5))
+                .as("the testing note was not passed in, so it must be gone")
+                .isEmpty();
+    }
+
+    @Test
     @DisplayName("ensureCollection is safe to call again, because it runs on every start")
     void ensureCollectionIsIdempotent() {
         qdrant.ensureCollection(EMBEDDER.dimensions());
@@ -124,7 +143,7 @@ class QdrantVectorStoreIT {
     }
 
     private static Chunk chunk(String file, String heading, String text) {
-        return new Chunk(MarkdownChunker.idFor(file, heading), file, heading, text,
+        return new Chunk(MarkdownChunker.idFor(file, heading, 0), file, heading, text,
                 file.startsWith("testing") ? "2026-09-02" : "2026-09-18", "jianan");
     }
 }

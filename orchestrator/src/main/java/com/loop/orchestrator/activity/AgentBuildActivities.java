@@ -6,6 +6,7 @@ import com.loop.orchestrator.agent.ReviewerAgent;
 import com.loop.orchestrator.domain.Domain.AcceptanceCriterion;
 import com.loop.orchestrator.domain.Domain.Agent;
 import com.loop.orchestrator.domain.Domain.CiResult;
+import com.loop.orchestrator.domain.Domain.CriterionVerdict;
 import com.loop.orchestrator.domain.Domain.ImplementResult;
 import com.loop.orchestrator.domain.Domain.Observation;
 import com.loop.orchestrator.domain.Domain.QaOutcome;
@@ -18,6 +19,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.stream.Stream;
 
 /**
  * The build and check half, driven by real agents where agents are the right tool.
@@ -110,15 +112,9 @@ public class AgentBuildActivities implements BuildActivities {
 
         QaAgent.Result judged = qa.judge(story, criteria, observations);
 
-        String evidence = judged.verdicts().stream()
-                .filter(verdict -> verdict.outcome() != QaOutcome.PASS)
-                .map(verdict -> verdict.criterionId() + ": " + verdict.evidence())
-                .findFirst()
-                .orElseGet(() -> judged.concerns().isEmpty()
-                        ? "all criteria satisfied"
-                        : judged.concerns().get(0).evidence());
+        QaOutcome route = judged.route();
 
-        return new QaResult(judged.route(), evidence, (int) judged.unverifiable(),
+        return new QaResult(route, evidenceFor(judged, route), (int) judged.unverifiable(),
                 judged.costUsd(), 0);
     }
 
@@ -154,6 +150,50 @@ public class AgentBuildActivities implements BuildActivities {
     public void writeBackDecision(String epicId, Story story, String decision) {
         log.info("[kb] {} would commit a decision from {}: {} (not yet wired)",
                 epicId, story.id(), decision);
+    }
+
+    /**
+     * The evidence belonging to the outcome that actually routed the story.
+     *
+     * <p>This used to take the first verdict that was not a PASS, in criterion order,
+     * which has nothing to do with how the story was routed. {@code route()} has its own
+     * precedence — a wrong criterion outranks a code defect — so with AC-1 unverifiable
+     * and AC-2 defective, the story was correctly routed back to the dev agent and then
+     * handed "AC-1: nothing was captured" as the thing to fix. The agent was told to
+     * correct the criterion QA could not check rather than the defect it found, and a
+     * story routed to the PM had the same problem: concerns were only consulted when every
+     * verdict passed, so the PM read an unverifiable note instead of the real gap.
+     */
+    private static String evidenceFor(QaAgent.Result judged, QaOutcome route) {
+        if (route == QaOutcome.PASS) {
+            // Nothing failed, so quoting a passing verdict says nothing. What is worth
+            // carrying is anything QA could not check: it is about to become a person's
+            // checklist item, and "all criteria satisfied" would be untrue of it.
+            return allVerdicts(judged)
+                    .filter(verdict -> verdict.outcome() == QaOutcome.UNVERIFIABLE)
+                    .map(AgentBuildActivities::describe)
+                    .findFirst()
+                    .orElse("all criteria satisfied");
+        }
+
+        return allVerdicts(judged)
+                .filter(verdict -> verdict.outcome() == route)
+                .map(AgentBuildActivities::describe)
+                .findFirst()
+                // route() derives the outcome from these verdicts, so there is always one
+                // to find. Saying so beats a cheerful default if that stops being true.
+                .orElse("QA routed this as " + route + " but reported no evidence for it");
+    }
+
+    private static Stream<CriterionVerdict> allVerdicts(QaAgent.Result judged) {
+        return Stream.concat(judged.verdicts().stream(), judged.concerns().stream());
+    }
+
+    /** Concerns carry no criterion id, by definition: no criterion covers them. */
+    private static String describe(CriterionVerdict verdict) {
+        return verdict.criterionId() == null || verdict.criterionId().isBlank()
+                ? verdict.evidence()
+                : verdict.criterionId() + ": " + verdict.evidence();
     }
 
     /**

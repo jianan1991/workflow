@@ -71,7 +71,11 @@ public class KnowledgeIndexer {
         }
 
         List<float[]> vectors = chunks.stream().map(c -> embedder.embed(c.embeddable())).toList();
-        store.upsert(chunks, vectors);
+
+        // replaceAll, not upsert. The directory is the source of truth: a section that was
+        // renamed or deleted must leave the index, or an agent goes on citing a decision
+        // that was reversed.
+        store.replaceAll(embedder.dimensions(), chunks, vectors);
 
         log.info("indexed {} chunk(s) from {} using {}", chunks.size(), root, embedder.name());
         return chunks.size();

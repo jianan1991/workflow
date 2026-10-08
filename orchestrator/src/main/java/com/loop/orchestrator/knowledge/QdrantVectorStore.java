@@ -67,7 +67,38 @@ public class QdrantVectorStore implements VectorStore {
     }
 
     @Override
+    public void replaceAll(int dimensions, List<Chunk> chunks, List<float[]> vectors) {
+        // Drop and recreate rather than delete by filter: it is one call, it is obviously
+        // total, and it cannot leave a subset behind through a filter that did not match
+        // what someone assumed it would.
+        try {
+            http.delete()
+                    .uri("/collections/{name}", collection)
+                    .retrieve()
+                    .toBodilessEntity();
+            log.info("qdrant collection '{}' dropped for a full reindex", collection);
+        } catch (RestClientResponseException e) {
+            // Already absent is the normal case on a first run.
+            if (e.getStatusCode().value() != 404) {
+                throw new IllegalStateException("could not drop the qdrant collection before "
+                        + "reindexing: " + e.getResponseBodyAsString(), e);
+            }
+        }
+
+        ensureCollection(dimensions);
+        upsert(chunks, vectors);
+    }
+
+    @Override
     public void upsert(List<Chunk> chunks, List<float[]> vectors) {
+        if (chunks.size() != vectors.size()) {
+            // The in-memory store has always said this plainly. Here it used to come out
+            // as IndexOutOfBoundsException from the loop below, and the whole point of
+            // having two implementations is that they fail the same way.
+            throw new IllegalArgumentException(
+                    "got %d chunks and %d vectors".formatted(chunks.size(), vectors.size()));
+        }
+
         List<Map<String, Object>> points = new ArrayList<>(chunks.size());
 
         for (int i = 0; i < chunks.size(); i++) {

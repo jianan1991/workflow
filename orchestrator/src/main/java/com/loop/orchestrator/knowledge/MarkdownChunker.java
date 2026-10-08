@@ -2,6 +2,7 @@ package com.loop.orchestrator.knowledge;
 
 import com.loop.orchestrator.knowledge.Knowledge.Chunk;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -63,7 +64,15 @@ public class MarkdownChunker {
             pending.setLength(0);
         }
 
-        chunks.add(new Chunk(idFor(file, heading), file, heading, text,
+        // Which occurrence of this heading in this file. A note with two "## Decision"
+        // sections produced one id for both, and the second silently overwrote the first
+        // in every store - the decision was simply gone from the index, so an agent asked
+        // a person a question the knowledge base had already answered.
+        int occurrence = (int) chunks.stream()
+                .filter(chunk -> chunk.heading().equals(heading))
+                .count();
+
+        chunks.add(new Chunk(idFor(file, heading, occurrence), file, heading, text,
                 front.date(), front.author()));
     }
 
@@ -73,10 +82,16 @@ public class MarkdownChunker {
 
     /**
      * Stable across runs, so editing a note updates its entry instead of leaving the old
-     * text in the index beside the new.
+     * text in the index beside the new. Distinct per occurrence, so a repeated heading
+     * does not overwrite itself.
+     *
+     * <p>UTF-8 explicitly. {@code getBytes()} takes the platform default, which meant a
+     * heading with any non-ASCII character hashed to a different id on Windows than in the
+     * Linux container — the same note, two entries, depending on where the indexer ran.
      */
-    static String idFor(String file, String heading) {
-        return UUID.nameUUIDFromBytes((file + "#" + heading).getBytes()).toString();
+    static String idFor(String file, String heading, int occurrence) {
+        String key = file + "#" + heading + "#" + occurrence;
+        return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8)).toString();
     }
 
     /** The {@code --- date: … author: … ---} block every note is expected to carry. */

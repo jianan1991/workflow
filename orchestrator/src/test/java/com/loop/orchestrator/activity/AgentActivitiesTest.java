@@ -160,6 +160,17 @@ class AgentActivitiesTest {
                 new ReviewerAgent(model, 4096), new QaAgent(model, 4096), dev);
     }
 
+    /** Build activities whose QA agent returns one exact reply, for the routing tests. */
+    private static AgentBuildActivities buildWithQaScript(String qaReply) {
+        Map<String, Function<ChatModel.ChatRequest, String>> script = new LinkedHashMap<>();
+        script.put(QaAgent.NAME, request -> qaReply);
+        ChatModel scripted = new ScriptedChatModel(script);
+
+        return new AgentBuildActivities(
+                new ReviewerAgent(scripted, 4096), new QaAgent(scripted, 4096),
+                new ScriptedDevAgent());
+    }
+
     @Nested
     @DisplayName("planning activities reach the agents")
     class Planning {
@@ -360,6 +371,66 @@ class AgentActivitiesTest {
             assertThat(build().mayAutoApprove(tierOne, clean, measured))
                     .as("the guards must not have closed the auto-approval path altogether")
                     .isTrue();
+        }
+
+        @Test
+        @DisplayName("the evidence QA reports belongs to the outcome that routed the story")
+        void evidenceMatchesTheRoute() {
+            // AC-1 could not be checked. AC-2 is the defect. The route is CODE_DEFECT, and
+            // the evidence used to be AC-1's, in criterion order - so the dev agent was
+            // retried with instructions to fix the thing QA could not check.
+            QaResult result = buildWithQaScript("""
+                    {"verdicts":[
+                      {"criterionId":"AC-1","outcome":"UNVERIFIABLE",
+                       "evidence":"Nothing was captured for the wording."},
+                      {"criterionId":"AC-2","outcome":"CODE_DEFECT",
+                       "evidence":"429 returned with an empty body."}
+                    ],"concerns":[]}
+                    """).runQa(STORY, CRITERIA, 1);
+
+            assertThat(result.outcome()).isEqualTo(QaOutcome.CODE_DEFECT);
+            assertThat(result.evidence())
+                    .as("this string is handed to the dev agent as the thing to correct")
+                    .isEqualTo("AC-2: 429 returned with an empty body.");
+        }
+
+        @Test
+        @DisplayName("a story routed to the PM carries the concern, not an unrelated unverifiable note")
+        void criterionWrongCarriesTheConcern() {
+            QaResult result = buildWithQaScript("""
+                    {"verdicts":[
+                      {"criterionId":"AC-1","outcome":"UNVERIFIABLE",
+                       "evidence":"Nothing was captured for the wording."},
+                      {"criterionId":"AC-2","outcome":"PASS",
+                       "evidence":"The diff touches only the limiter."}
+                    ],"concerns":[
+                      {"outcome":"CRITERION_WRONG",
+                       "evidence":"It fails open when Redis is down; no criterion covers that."}
+                    ]}
+                    """).runQa(STORY, CRITERIA, 1);
+
+            assertThat(result.outcome()).isEqualTo(QaOutcome.CRITERION_WRONG);
+            assertThat(result.evidence())
+                    .as("concerns were only read when every verdict passed, so the PM got "
+                            + "an unverifiable note instead of the gap")
+                    .isEqualTo("It fails open when Redis is down; no criterion covers that.");
+        }
+
+        @Test
+        @DisplayName("a pass with something unchecked names it, rather than claiming everything was satisfied")
+        void passNamesWhatWasNotChecked() {
+            QaResult result = buildWithQaScript("""
+                    {"verdicts":[
+                      {"criterionId":"AC-1","outcome":"PASS","evidence":"429 after 100."},
+                      {"criterionId":"AC-2","outcome":"UNVERIFIABLE",
+                       "evidence":"Nothing was captured for the wording."}
+                    ],"concerns":[]}
+                    """).runQa(STORY, CRITERIA, 1);
+
+            assertThat(result.outcome()).isEqualTo(QaOutcome.PASS);
+            assertThat(result.evidence())
+                    .as("it is about to become a person's checklist item, so say which one")
+                    .contains("AC-2");
         }
 
         @Test
